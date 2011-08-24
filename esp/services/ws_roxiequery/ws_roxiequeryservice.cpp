@@ -636,3 +636,134 @@ bool CWsRoxieQueryEx::onQueryDetails(IEspContext &context, IEspRoxieQueryDetails
     }
     return true;
 }
+
+bool CWsRoxieQueryEx::onGVCAjaxGraph(IEspContext &context, IEspGVCAjaxGraphRequest &req, IEspGVCAjaxGraphResponse &resp)
+{
+    resp.setName(req.getName());
+    resp.setGraphName(req.getGraphName());
+    resp.setGraphType("roxieconfig");
+    return true;
+}
+bool CWsRoxieQueryEx::onShowGVCGraph(IEspContext &context, IEspShowGVCGraphRequest &req, IEspShowGVCGraphResponse &resp)
+    {
+        const char *queryName = req.getQueryId();
+        if (!queryName || !*queryName)
+            throw MakeStringException(0, "Missing Roxie query name!");
+
+        StringArray graphNames;
+        enumerateGraphs(queryName, graphNames);
+
+        char graphName[256];
+        if (req.getGraphName() && *req.getGraphName())
+        {
+            strcpy(graphName, req.getGraphName());
+        }
+        else if (graphNames.length() > 0)
+        {
+            StringBuffer graphName0 = graphNames.item(0);
+            strcpy(graphName, graphName0.str());
+        }
+        else
+        {
+            throw MakeStringException(0, "Graph not found!");
+        }
+
+        Owned<IPropertyTree> pXgmmlGraph = getXgmmlGraph(queryName, graphName);
+
+        StringBuffer xml;
+        toXML(pXgmmlGraph, xml);
+
+        if (xml.length() > 0)
+        {
+            StringBuffer str;
+            encodeUtf8XML(xml.str(), str, 0);
+
+            StringBuffer xml1;
+            xml1.append("<Control>");
+            xml1.append("<Endpoint>");
+            xml1.append("<Query id=\"Gordon.Extractor.0\">");
+            xml1.appendf("<Graph id=\"%s\">", graphName);
+            xml1.append("<xgmml>");
+            xml1.append(str);
+            xml1.append("</xgmml>");
+            xml1.append("</Graph>");
+            xml1.append("</Query>");
+            xml1.append("</Endpoint>");
+            xml1.append("</Control>");
+
+            resp.setTheGraph(xml1);
+        }
+
+        if (graphName && *graphName)
+            resp.setGraphName( graphName );
+        resp.setQueryId( queryName );
+        resp.setGraphNames( graphNames );
+        return true;
+    }
+
+void enumerateGraphs(const char *queryName, StringArray& graphNames)
+{
+    try
+    {
+        int port;
+        StringBuffer netAddress;
+        SocketEndpoint ep;
+        getClusterConfig(ROXIE_CLUSTER, cluster, ROXIE_FARMERPROCESS1, netAddress, port);
+        ep.set(netAddress.str(), port);
+
+
+        Owned<IRoxieCommunicationClient> roxieClient = createRoxieCommunicationClient(ep, 60000);
+        Owned<IPropertyTree> result = roxieClient->retrieveQueryStats(queryName, "listGraphNames", NULL, false);
+        IPropertyTree* rootTree = result->queryPropTree("Endpoint/Query");
+
+        if (rootTree)
+        {
+            Owned<IPropertyTreeIterator> graphit = rootTree->getElements("Graph");
+            ForEach(*graphit)
+            {
+                const char* graphName = graphit->query().queryProp("@id");
+                graphNames.append( graphName );
+            }
+        }
+    }
+    catch (IException *e)
+    {
+        StringBuffer errmsg;
+        ERRLOG("Exception when enumerating graphs for %s: %s", queryName, e->errorMessage(errmsg).str());
+        throw e;
+    }
+    catch(...)
+    {
+        ERRLOG("Unknown exception when enumerating graphs for %s", queryName);
+        throw MakeStringException(-1, "Unknown exception while enumerating graphs for %s", queryName);
+    }
+}
+
+IPropertyTree* getXgmmlGraph(const char *queryName, const char* graphName)
+{
+    try
+    {
+        Owned<IRoxieCommunicationClient> roxieClient = createRoxieCommunicationClient(ep, roxieTimeout);
+        Owned<IPropertyTree> result = roxieClient->retrieveQueryStats(queryName, "selectGraph", graphName, true);
+
+        StringBuffer xpath;
+        xpath   << "Endpoint/Query/Graph[@id='" 
+                << graphName
+                << "']/xgmml/graph";
+        IPropertyTree* pXgmmlGraph = result->queryPropTree(xpath.str());
+        if (!pXgmmlGraph)
+            throw MakeStringException(-1, "Graph not found!");
+        return LINK( pXgmmlGraph );
+    }
+    catch (IException *e)
+    {
+        StringBuffer errmsg;
+        ERRLOG("Exception when fetching graph %s for %s: %s", graphName, queryName, e->errorMessage(errmsg).str());
+        throw e;
+    }
+    catch(...)
+    {
+        ERRLOG("Unknown exception when fetching graph %s for %s", graphName, queryName);
+        throw MakeStringException(-1, "Unknown exception while generating graph %s for %s", graphName, queryName);
+    }
+}
