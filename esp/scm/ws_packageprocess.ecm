@@ -117,6 +117,19 @@ ESPresponse CopyFilesResponse
     ESPstruct BasePackageStatus status;
 };
 
+ESPrequest ValidatePackageRequest
+{
+    string PackageName;
+    string QuerySet;
+    string Info;
+};
+
+
+ESPresponse ValidatePackageResponse
+{
+    ESPstruct BasePackageStatus status;
+};
+
 ESPservice [version("1.00"), default_client_version("1.00"), exceptions_inline("./smc_xslt/exceptions.xslt")] WsPackageProcess
 {
     ESPmethod Echo(EchoRequest, EchoResponse);
@@ -127,6 +140,7 @@ ESPservice [version("1.00"), default_client_version("1.00"), exceptions_inline("
     ESPmethod ListPackage(ListPackageRequest, ListPackageResponse);
     ESPmethod GetPackage(GetPackageRequest, GetPackageResponse);
     ESPmethod CopyFiles(CopyFilesRequest, CopyFilesResponse);
+    ESPmethod ValidatePackage(ValidatePackageRequest, ValidatePackageResponse);
 };
 
 SCMexportdef(WsPackageProcess);

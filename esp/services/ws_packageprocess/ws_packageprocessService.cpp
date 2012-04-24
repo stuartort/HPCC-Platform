@@ -64,6 +64,31 @@ IPropertyTree *getPkgSetRegistry(const char *setName, bool readonly)
     return conn->getRoot();
 }
 
+IPropertyTree *getQuerySetRegistry(const char *setName, bool readonly)
+{
+    Owned<IRemoteConnection> globalLock = querySDS().connect("/QuerySets/", myProcessSession(), RTM_LOCK_WRITE|RTM_CREATE_QUERY, SDS_LOCK_TIMEOUT);
+
+    //Only lock the branch for the target we're interested in.
+    StringBuffer xpath;
+    xpath.append("/QuerySets/QuerySet[@id=\"").append(setName).append("\"]");
+    Owned<IRemoteConnection> conn = querySDS().connect(xpath.str(), myProcessSession(), readonly ? RTM_LOCK_READ : RTM_LOCK_WRITE, SDS_LOCK_TIMEOUT);
+    if (!conn)
+    {
+        if (readonly)
+            return NULL;
+        Owned<IPropertyTree> querySet = createPTree();
+        querySet->setProp("@id", setName);
+        globalLock->queryRoot()->addPropTree("QuerySet", querySet.getClear());
+        globalLock->commit();
+
+        conn.setown(querySDS().connect(xpath.str(), myProcessSession(), RTM_LOCK_WRITE, SDS_LOCK_TIMEOUT));
+        if (!conn)
+            throwUnexpected();
+    }
+
+    return conn->getRoot();
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 const unsigned roxieQueryRoxieTimeOut = 60000;
 
@@ -255,6 +280,313 @@ void copyPackageSubFiles(IPropertyTree *packageInfo, const char *process, const 
             }
         }
     }
+}
+
+
+void validateDataPackageInfo(IPropertyTree *control, IPropertyTree *dataPackages, StringAttrMapping &packageList, StringBuffer &reply)
+{
+	bool displayAllInfo = control->getPropBool("@displayAllInfo", false);
+
+	Owned<IPropertyTreeIterator> packages = control->getElements("Package");
+
+	ForEach (*packages)  // check each package 'id' for uniqueness
+	{
+		IPropertyTree &pkg = packages->query();
+		if (pkg.hasProp("SuperFile"))   // only care about data packages - SuperFile contents can be empty
+		{
+			StringBuffer pkgname(pkg.queryProp("@id"));
+			if (packageList.find(pkgname) == 0)
+			{
+				packageList.setValue(pkgname, pkgname);
+				dataPackages->addPropTree(pkgname, LINK(&pkg));
+				StringAttrMapping fileList(false);
+
+				// need to know if any SubFile exists for each SuperFile
+				Owned<IPropertyTreeIterator> super_items = pkg.getElements("SuperFile");
+				ForEach(*super_items)
+				{
+					Owned<IPropertyTreeIterator> items = super_items->query().getElements("SubFile");
+
+					bool foundSubFile = false;
+					ForEach (*items)
+					{
+						foundSubFile = true;
+						StringBuffer name(items->query().queryProp("@value"));
+						if (fileList.find(name) == 0)
+						{
+							fileList.setValue(name, name);
+							// need to lookup file in dali
+							//bool exists = farmerManager->isFileInfoLoaded(name);
+							bool exists = true;
+							if (!exists)
+							{
+								StringBuffer err;
+								err.appendf("ERROR: Missing File %s in package %s", name.str(), pkgname.str());
+
+								reply.appendf("<Error id='%s' value='MissingFile'/>\n", name.str());
+								reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+
+								DBGLOG("did NOT find %s", name.str());
+							}
+							else if (displayAllInfo)  // file exists and we want to know it...
+								DBGLOG("found %s", name.str());
+						}
+						else
+						{
+							StringBuffer err;
+							err.appendf("ERROR: Duplicate File %s in package %s", name.str(), pkgname.str());
+							reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+							DBGLOG("file %s not unique in package %s", name.str(), pkgname.str());
+						}
+					}
+
+					if (!foundSubFile)
+					{
+						StringBuffer name(super_items->query().queryProp("@id"));
+						StringBuffer err;
+						err.appendf("WARNING: SuperFile %s has no SubFiles defined", name.str());
+						reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+
+						DBGLOG("%s", err.str());
+					}
+
+				}
+			}
+			else
+			{
+				StringBuffer err;
+				err.appendf("Duplicate PackageFile %s", pkgname.str());
+
+				reply.appendf("<Error id='%s' value='Duplicate PackageFile '/>", pkgname.str());
+				reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+
+				DBGLOG("package name %s is NOT unique", pkgname.str());
+			}
+		}
+		else if (pkg.hasProp("Environment"))
+		{
+			StringBuffer pkgname(pkg.queryProp("@id"));
+			bool hasBaseId = (pkg.hasProp("Base"));
+			if ( (packageList.find(pkgname) == 0) || (hasBaseId))
+			{
+				if (!hasBaseId)
+					packageList.setValue(pkgname, pkgname);
+
+				// package defining Superfiles - check...
+				// unique subfile names within a package
+				// make sure that roxie knows about the subfile name
+				Owned<IPropertyTreeIterator> items = pkg.getElements("Environment");
+
+				dataPackages->addPropTree(pkgname, LINK(&pkg));
+				StringAttrMapping fileList(false);
+
+				ForEach (*items)
+				{
+					StringBuffer name(items->query().queryProp("@id"));
+					StringBuffer val(items->query().queryProp("@val"));
+					if (fileList.find(name) == 0)
+					{
+						fileList.setValue(name, name);
+						if (val.length() == 0)
+						{
+							StringBuffer err;
+							err.appendf("WARNING: Environment variable id = %s has no value specified", name.str());
+							reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+							DBGLOG(err.str());
+						}
+					}
+					else
+					{
+						StringBuffer err;
+						err.appendf("ERROR: Duplicate environment variable %s in package %s", name.str(), pkgname.str());
+						reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+
+						DBGLOG("file %s not unique in package %s", name.str(), pkgname.str());
+					}
+				}
+			}
+			else
+			{
+				StringBuffer err;
+				err.appendf("Duplicate PackageFile %s", pkgname.str());
+
+				reply.appendf("<Error id='%s' value='Duplicate PackageFile '/>\n", pkgname.str());
+				reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+				//reply.appendf("<Error id='%s' value='Duplicate PackageFile %s'/>\n", pkgname.str(), pkgname.str());
+				DBGLOG("package name %s is NOT unique", pkgname.str());
+			}
+		}
+	}
+}
+
+void validateQueryPackageInfo(IPropertyTree *control, IPropertyTree *dataPackages, StringAttrMapping &packageList, StringAttr &querySet, StringBuffer &reply)
+{
+	bool displayAllInfo = control->getPropBool("@displayAllInfo", false);
+
+	Owned<IPropertyTreeIterator> packages = control->getElements("Package");
+	Owned<IPropertyTree> querySetRegistry = getQuerySetRegistry(querySet, false);
+
+	ForEach (*packages)  // check each package 'id' for uniqueness
+	{
+		IPropertyTree &pkg = packages->query();
+
+		if (pkg.hasProp("Base"))  // only care about query packages
+		{
+			StringBuffer pkgname(pkg.queryProp("@id"));
+			if (packageList.find(pkgname) == 0)
+			{
+				packageList.setValue(pkgname, pkgname);
+
+				StringAttrMapping queryFileNames(false);
+
+				bool compulsory = false;
+				Owned<IAttributeIterator> attrs = pkg.getAttributes();
+				for(attrs->first(); attrs->isValid(); attrs->next())
+				{
+					const char *name = attrs->queryName();
+					if (stricmp(name, "@compulsory") == 0)
+					{
+						const char *value = attrs->queryValue();
+						if (value && *value)
+							compulsory = strToBool(value);
+					}
+				}
+
+				bool found = false;
+				if (querySetRegistry)
+				{
+					VStringBuffer xpath("Query[@id='%s']", pkgname.str());
+					if (querySetRegistry->hasProp(xpath.str()))
+						found = true;
+				}
+				if (!found)
+				{
+					StringBuffer err;
+					err.appendf("Query : %s not found in roxie's list of queries", pkgname.str());
+					reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+
+					DBGLOG("%s", err.str());
+					continue;
+				}
+
+				if (compulsory)
+				{
+#ifdef NOTNOW
+						IPropertyTree *fileTree = factory->queryFileTree();
+						if (fileTree) // should always exist - be just being careful
+						{
+							Owned<IPropertyTreeIterator> superkeys = fileTree->getElements("SuperKey");
+							ForEach (*superkeys)
+							{
+								IPropertyTree &superkey = superkeys->query();
+								StringBuffer superName = superkey.queryProp("@id");
+	//							superName.toLowerCase();
+								queryFileNames.setValue(superName.str(), superName.str());
+							}
+
+							Owned<IPropertyTreeIterator> superfiles = fileTree->getElements("SuperFile");
+							ForEach (*superfiles)
+							{
+								IPropertyTree &superfile = superfiles->query();
+								StringBuffer superName = superfile.queryProp("@id");
+	//							superName.toLowerCase();
+								queryFileNames.setValue(superName.str(), superName.str());
+							}
+						}
+						else
+						{
+							DBGLOG("no file info found for %s", pkgname.str());
+						}
+#endif
+				}
+
+				// walk the base ids, see if it exists as a package name in the information passed in
+				// and also check for duplicate entries
+				Owned<IPropertyTreeIterator> items = pkg.getElements("Base");
+				StringAttrMapping fileList(false);
+				ForEach (*items)
+				{
+					StringBuffer name(items->query().queryProp("@id"));
+					if (fileList.find(name) == 0)
+					{
+						fileList.setValue(name, name);
+
+						IPropertyTree *dataPackage = dataPackages->queryPropTree(name.str());
+						if (!dataPackage)
+						{
+							StringBuffer err;
+							err.appendf("WARNING: Package %s refers to undefined package %s", pkgname.str(), name.str());
+
+							reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+							DBGLOG("did NOT find %s", name.str());
+						}
+						else
+						{
+							if (displayAllInfo)  // file exists and we want to know it...
+								DBGLOG("found %s", name.str());
+
+							if (compulsory)
+							{
+								// walk the contents of data package and look remove name from queryFileName list
+								Owned<IPropertyTreeIterator> pkgfiles = dataPackage->getElements("SuperFile");
+								ForEach(*pkgfiles)
+								{
+									StringBuffer pkgfile(pkgfiles->query().queryProp("@id"));
+									//pkgfile.toLowerCase();
+									queryFileNames.remove(pkgfile.str());  // don't care if it doesn't find it
+								}
+							}
+						}
+					}
+					else
+					{
+						StringBuffer err;
+						err.appendf("ERROR: Duplicate Base Id %s in package %s", name.str(), pkgname.str());
+
+						reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+						DBGLOG("file %s not unique in package %s", name.str(), pkgname.str());
+					}
+				}
+
+				HashIterator queryFileNames_iter(queryFileNames);
+				StringBuffer err;
+				for (queryFileNames_iter.first(); queryFileNames_iter.isValid(); queryFileNames_iter.next())
+				{
+					if (err.length() == 0)
+						err.appendf("Error QUERY : %s  could not find compulsory DATASET(S) :", pkgname.str());
+					else
+						err.append(",");
+
+					err.appendf(" %s", (const char *)queryFileNames_iter.query().getKey());
+				}
+				if (err.length())
+				{
+					reply.appendf("<Error id='%s' value='Compulsory files not found'/>\n", pkgname.str());
+					reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+					DBGLOG("%s", err.str());
+				}
+			}
+			else
+			{
+				StringBuffer err;
+				err.appendf("Duplicate PackageFile %s", pkgname.str());
+
+				reply.appendf("<Error id='%s' value='Duplicate PackageFile '/>\n", pkgname.str());
+				reply.appendf("<Exception><Source>PackageValidation</Source><Message>%s</Message></Exception>", err.str());
+				DBGLOG("package name %s is NOT unique", pkgname.str());
+			}
+		}
+	}
+}
+
+
+void validatePackageInfo(IPropertyTree *packageInfo, StringAttr &querySet, StringBuffer &reply)
+{
+
+	StringAttrMapping packageList(false);
+	Owned <IPropertyTree> dataPackages = createPTree("Data", false);
+	validateDataPackageInfo(packageInfo, dataPackages, packageList, reply);
+	validateQueryPackageInfo(packageInfo, dataPackages, packageList, querySet, reply);
 }
 
 void getPackageListInfo(IPropertyTree *mapTree, IEspPackageListMapData *pkgList)
@@ -537,6 +869,26 @@ bool CWsPackageProcessEx::onCopyFiles(IEspContext &context, IEspCopyFilesRequest
 
     StringBuffer msg;
     msg.append("Successfully loaded ").append(pkgName.get());
+    resp.updateStatus().setDescription(msg.str());
+    return true;
+}
+
+bool CWsPackageProcessEx::onValidatePackage(IEspContext &context, IEspValidatePackageRequest &req, IEspValidatePackageResponse &resp)
+{
+    resp.updateStatus().setCode(0);
+    StringBuffer info(req.getInfo());
+    StringAttr pkgName(req.getPackageName());
+
+    StringAttr querySet(req.getQuerySet());
+    Owned<IPropertyTree> packageTree = createPTreeFromXMLString(info.str());
+    StringBuffer reply;
+    validatePackageInfo(LINK(packageTree), querySet, reply);
+
+    VStringBuffer msg("Validation of package %s complete", pkgName.get());
+    if (reply.length())
+    {
+    	msg.appendf(" %s", reply.str());
+    }
     resp.updateStatus().setDescription(msg.str());
     return true;
 }

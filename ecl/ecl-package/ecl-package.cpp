@@ -613,6 +613,86 @@ private:
     bool optOverWrite;
 };
 
+class EclCmdPackageValidate : public EclCmdCommon
+{
+public:
+    EclCmdPackageValidate()
+    {
+    }
+    virtual bool parseCommandLineOptions(ArgvIterator &iter)
+    {
+        if (iter.done())
+        {
+            usage();
+            return false;
+        }
+
+        for (; !iter.done(); iter.next())
+        {
+            const char *arg = iter.query();
+            if (*arg!='-')
+            {
+                optFileName.set(arg);
+                return true;
+            }
+            if (iter.matchOption(optQuerySet, ECLOPT_QUERYSET))
+                continue;
+            if (EclCmdCommon::matchCommandLineOption(iter, true)!=EclCmdOptionMatch)
+                return false;
+        }
+        return true;
+    }
+    virtual bool finalizeOptions(IProperties *globals)
+    {
+        if (!EclCmdCommon::finalizeOptions(globals))
+        {
+            usage();
+            return false;
+        }
+        StringBuffer err;
+        if (optFileName.isEmpty())
+            err.append("\n ... Missing package file name\n\n");
+
+        if (err.length())
+        {
+            fprintf(stdout, "%s", err.str());
+            usage();
+            return false;
+        }
+        return true;
+    }
+    virtual int processCMD()
+    {
+        Owned<IClientWsPackageProcess> packageProcessClient = getWsPackageSoapService(optServer, optPort, optUsername, optPassword);
+        StringBuffer pkgInfo;
+        pkgInfo.loadFile(optFileName);
+
+        fprintf(stdout, "\n ... validating the contents of package %s\n\n", optFileName.get());
+
+        Owned<IClientValidatePackageRequest> request = packageProcessClient->createValidatePackageRequest();
+        request->setInfo(pkgInfo);
+        request->setPackageName(optFileName);
+        request->setQuerySet(optQuerySet);
+
+        Owned<IClientValidatePackageResponse> resp = packageProcessClient->ValidatePackage(request);
+        StringBuffer status(resp->getStatus().getDescription());
+        fprintf(stdout, "status...   %s\n", status.str());
+        return 0;
+    }
+
+    virtual void usage()
+    {
+        fprintf(stdout,"\nUsage:\n\n"
+            "ecl package validate [<filename>]\n\n"
+        );
+        EclCmdCommon::usage();
+    }
+private:
+    StringAttr optFileName;
+    StringAttr optQuerySet;
+    StringBuffer pkgInfo;
+};
+
 IEclCommand *createPackageSubCommand(const char *cmdname)
 {
     if (!cmdname || !*cmdname)
@@ -631,6 +711,8 @@ IEclCommand *createPackageSubCommand(const char *cmdname)
         return new EclCmdPackageList();
     if (strieq(cmdname, "copyFiles"))
         return new EclCmdPackageCopyFiles();
+    if (strieq(cmdname, "validate"))
+        return new EclCmdPackageValidate();
     return NULL;
 }
 
@@ -656,6 +738,8 @@ public:
             "      deactivate   deactivate a package (package will not get loaded)\n"
             "      list         list loaded package names\n"
             "      info         return active package information for a cluster\n"
+            "      validate     validate the contents of the package\n"
+
         );
     }
 };
