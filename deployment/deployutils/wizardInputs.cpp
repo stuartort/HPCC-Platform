@@ -1,19 +1,18 @@
 /*#############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 #############################################################################*/
 
 /////////////////////////////////////////////////////////////////////////////
@@ -170,13 +169,13 @@ void CWizardInputs::setWizardRules()
        else if(!strcmp(iter->getPropKey(), "avoid_combo"))
        {
          StringArray pairValue;
-         DelimToStringArray(prop.str(), pairValue, ",");
+         pairValue.appendList(prop.str(), ",");
          if( pairValue.ordinality() > 0)
          {
            for( unsigned i = 0; i < pairValue.ordinality() ; i++)
            {
              StringArray eachpair;
-             DelimToStringArray(pairValue.item(i), eachpair, "-");
+             eachpair.appendList(pairValue.item(i), "-");
              if(eachpair.ordinality() == 2 )
              {
                StringArray* serverCompArr = 0;
@@ -200,15 +199,15 @@ void CWizardInputs::setWizardRules()
          }
        }
        else if(!strcmp (iter->getPropKey(),"do_not_generate"))
-          DelimToStringArray(prop.str(), m_doNotGenComp, ",");
+           m_doNotGenComp.appendList(prop.str(), ",");
        else if(!strcmp (iter->getPropKey(),"comps_on_all_nodes"))
-          DelimToStringArray(prop.str(), m_compOnAllNodes, ",");
+           m_compOnAllNodes.appendList(prop.str(), ",");
        else if(!strcmp(iter->getPropKey(), "topology_for_comps"))
-        DelimToStringArray(prop.str(), m_clusterForTopology, ",");
+           m_clusterForTopology.appendList(prop.str(), ",");
        else if (!strcmp(iter->getPropKey(), "roxie_agent_redundancy"))
        {
          StringArray sbarr;
-         DelimToStringArray(prop.str(), sbarr, ",");
+         sbarr.appendList(prop.str(), ",");
          if (sbarr.length() > 1)
          {
           int type = atoi(sbarr.item(0));
@@ -1070,7 +1069,7 @@ void CWizardInputs::checkAndAddDependComponent(const char* key)
     if(m_algProp->hasProp(paramEntry.str()))
     {
       StringArray sArray;
-      DelimToStringArray(m_algProp->queryProp(paramEntry.str()), sArray, ";");
+      sArray.appendList(m_algProp->queryProp(paramEntry.str()), ";");
       ForEachItemIn(x, sArray)
       {
         if(m_doNotGenComp.find(sArray.item(x)) == NotFound)
@@ -1109,7 +1108,7 @@ void CWizardInputs::setTopologyParam()
         StringArray* compClusterArr = new StringArray();
        
         StringArray clusterElemArr;
-        DelimToStringArray( elemForCluster, clusterElemArr, ",");
+        clusterElemArr.appendList(elemForCluster, ",");
         ForEachItemIn(y, clusterElemArr)
           compClusterArr->append(clusterElemArr.item(y));
         m_compForTopology.setValue(m_clusterForTopology.item(x),compClusterArr);

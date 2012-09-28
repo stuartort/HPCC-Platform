@@ -1,22 +1,22 @@
 /*##############################################################################
-#    Copyright (C) 2011 HPCC Systems.
+#    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 #
-#    All rights reserved. This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
 #
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
+#       http://www.apache.org/licenses/LICENSE-2.0
 #
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License.
 ############################################################################## */
 define([
 	"dojo/_base/fx",
 	"dojo/_base/window",
+	"dojo/_base/xhr",
 	"dojo/dom",
 	"dojo/dom-style",
 	"dojo/dom-geometry",
@@ -27,18 +27,23 @@ define([
 	"hpcc/GraphControl",
 	"hpcc/ResultsControl",
 	"hpcc/SampleSelectControl",
-	"hpcc/ESPWorkunit"
-], function (fx, baseWindow, dom, domStyle, domGeometry, on, ready, registry, EclEditor, GraphControl, ResultsControl, Select, Workunit) {
+	"hpcc/ESPBase",
+	"hpcc/ESPWorkunit",
+	"dijit/form/Select"
+], function (fx, baseWindow, xhr, dom, domStyle, domGeometry, on, ready, registry, EclEditor, GraphControl, ResultsControl, Select, ESPBase, Workunit, dijitSelect) {
 	var wu = null,
+			target = "",
 			editorControl = null,
 			graphControl = null,
 			resultsControl = null,
 			sampleSelectControl = null,
 
 			initUi = function () {
+				var _target = dojo.queryToObject(dojo.doc.location.search.substr((dojo.doc.location.search.substr(0, 1) == "?" ? 1 : 0)))["Target"];
+				if (_target) {
+					target = _target;
+				}
 				var wuid = dojo.queryToObject(dojo.doc.location.search.substr((dojo.doc.location.search.substr(0, 1) == "?" ? 1 : 0)))["Wuid"];
-				on(dom.byId("submitBtn"), "click", doSubmit);
-
 				if (wuid) {
 					dojo.destroy("topPane");
 					registry.byId("appLayout").resize();
@@ -47,6 +52,7 @@ define([
 				}
 				initEditor();
 				initResultsControl();
+				initTargets();
 
 				//  ActiveX will flicker if created before initial layout
 				setTimeout(function () {
@@ -59,8 +65,11 @@ define([
 							editorControl.setText(text);
 						});
 						wu.monitor(monitorEclPlayground);
+					} else {
+						graphControl.watchSelect(sampleSelectControl.select);
 					}
 				}, 1);
+				on(dom.byId("submitBtn"), "click", doSubmit);
 			},
 
 			initUiResults = function () {
@@ -146,6 +155,57 @@ define([
 				});
 			},
 
+			initTargets = function () {
+				var base = new ESPBase({
+				});
+				var request = {
+					rawxml_: true
+				};
+
+				xhr.post({
+					url: base.getBaseURL("WsTopology") + "/TpTargetClusterQuery",
+					handleAs: "xml",
+					content: request,
+					load: function (xmlDom) {
+						var targetData = base.getValues(xmlDom, "TpTargetCluster");
+						var options = [];
+						var has_hthor = false;
+						for (var i = 0; i < targetData.length; ++i) {
+							options.push({
+								label: targetData[i].Name, 
+								value: targetData[i].Name							
+							});
+							if (targetData[i].Name == "hthor") {
+								has_hthor = true;
+							}
+						}
+
+						var select = new dijitSelect({
+								name: "targetSelect",
+								options: options,
+								maxHeight: -1,
+								onChange: function () {
+									target = dijit.byId(this.id).get("value");
+								}
+						}, "targetSelect");
+
+						if (target == "") {
+							if (has_hthor) {
+								target = "hthor";
+								select.set("value", target);
+							} else {
+								target = options[0].value;
+							}
+						} else {
+							select.set("value", target);
+						}
+						select.startup();
+					},
+					error: function () {
+					}
+				});
+			},
+
 			resetPage = function () {
 				editorControl.clearErrors();
 				editorControl.clearHighlightLines();
@@ -193,7 +253,7 @@ define([
 						wu.update(editorControl.getText());
 					},
 					onUpdate: function () {
-						wu.submit("hthor");
+						wu.submit(target);
 					},
 					onSubmit: function () {
 						wu.monitor(monitorEclPlayground);

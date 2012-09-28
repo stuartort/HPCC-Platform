@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 #include "platform.h"
 #include "jlib.hpp"
@@ -2111,6 +2110,7 @@ IHqlExpression * foldConstantOperator(IHqlExpression * expr, unsigned foldOption
             break;
         }
     case no_choose:
+    case no_chooseds:
         {
             IHqlExpression * child = expr->queryChild(0);
             IValue * constValue = child->queryValue();
@@ -2603,9 +2603,11 @@ IHqlExpression * foldConstantOperator(IHqlExpression * expr, unsigned foldOption
 
             if (numCases == 1)
             {
-                IHqlExpression * child = expr->queryChild(1);
-                IHqlExpression * newEqual = createBoolExpr(no_eq, LINK(leftExpr), LINK(child->queryChild(0)));
-                return createIf(newEqual, LINK(child->queryChild(1)), LINK(expr->queryChild(2)));
+                IHqlExpression * mapto = expr->queryChild(1);
+                IHqlExpression * key = mapto->queryChild(0);
+                OwnedITypeInfo type = getPromotedCompareType(leftExpr->queryType(), key->queryType());
+                IHqlExpression * newEqual = createBoolExpr(no_eq, ensureExprType(leftExpr, type), ensureExprType(key, type));
+                return createIf(newEqual, LINK(mapto->queryChild(1)), LINK(expr->queryChild(2)));
             }
             break;
         }
@@ -2996,6 +2998,19 @@ IHqlExpression * foldConstantOperator(IHqlExpression * expr, unsigned foldOption
                 return createConstant(value->castTo(expr->queryType()));
         }
         break;
+    case no_countdict:
+        {
+            IHqlExpression * child = expr->queryChild(0);
+            node_operator childOp = child->getOperator();
+            switch (childOp)
+            {
+            case no_inlinedictionary:
+                if (isPureInlineDataset(child))
+                    return createConstant(expr->queryType()->castFrom(false, (__int64)child->queryChild(0)->numChildren()));
+                break;
+            }
+            break;
+        }
     case no_countlist:
         {
             IHqlExpression * child = expr->queryChild(0);
@@ -4287,6 +4302,7 @@ IHqlExpression * CExprFolderTransformer::doFoldTransformed(IHqlExpression * unfo
             unwindChildren(args, expr, 1); // (count, trans)
             if (newTransform)
                 args.replace(*newTransform.getClear(), 1);
+            removeProperty(args, _selectorSequence_Atom);
 
             return createDataset(no_dataset_from_transform, args);
         }
@@ -4538,7 +4554,7 @@ IHqlExpression * CExprFolderTransformer::doFoldTransformed(IHqlExpression * unfo
                         ForEachChild(i, transforms)
                         {
                             IHqlExpression * cur = transforms->queryChild(i);
-                            if (!cur->isPure())
+                            if (!cur->isPure() || containsSkip(cur))
                             {
                                 ok = false;
                                 break;
@@ -5570,6 +5586,13 @@ HqlConstantPercolator * CExprFolderTransformer::gatherConstants(IHqlExpression *
         //all bets are off.
         break;
 
+    case no_newuserdictionary:
+    case no_userdictionary:
+    case no_inlinedictionary:
+    case no_selectmap:
+        // MORE - maybe should be something here?
+        break;
+
     case no_selectnth:
         {
             //Careful - this can create a null row if it is out of range.
@@ -5607,6 +5630,7 @@ HqlConstantPercolator * CExprFolderTransformer::gatherConstants(IHqlExpression *
     case no_map:
     case no_merge:
     case no_cogroup:
+    case no_chooseds:
         {
             unsigned from = getFirstActivityArgument(expr);
             unsigned max = from + getNumActivityArguments(expr);

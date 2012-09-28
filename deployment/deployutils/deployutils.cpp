@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 // DeployUtils.cpp : Defines the exported functions for the DLL application.
 //
@@ -1816,7 +1815,7 @@ IPropertyTree* generateTreeFromXsd(const IPropertyTree* pEnv, IPropertyTree* pSc
     GenOptional genOpt = GENOPTIONAL_COMPS;
     algProp->getProp("do_not_gen_optional", prop);
     StringArray doNotGenOpt;
-    DelimToStringArray(prop.str(), doNotGenOpt, ",");
+    doNotGenOpt.appendList(prop.str(), ",");
 
     if (doNotGenOpt.length() == 0)
       genOpt = GENOPTIONAL_ALL;
@@ -3200,7 +3199,7 @@ void formIPList(const char* ip, StringArray& formattedIpList)
          ipList.setCharAt((ipList.length()-1),' ');
 
     StringArray sArray;
-    DelimToStringArray(ipList, sArray, ";");
+    sArray.appendList(ipList, ";");
 
     if(sArray.ordinality() > 0 )
     {
@@ -3213,13 +3212,13 @@ void formIPList(const char* ip, StringArray& formattedIpList)
               {
                 StringArray rangeArr, commIPPart ;
                 StringBuffer comip;
-                DelimToStringArray(ip, rangeArr ,"-");
+                rangeArr.appendList(ip, "-");
 
                 if( rangeArr.ordinality() == 2 )
                 {
                    unsigned endAddr = atoi(rangeArr.item(1));
                    //to get common part of IP
-                   DelimToStringArray(rangeArr.item(0),commIPPart,".");
+                   commIPPart.appendList(rangeArr.item(0),".");
                    StringBuffer newip;
                    if(commIPPart.ordinality() == 4)
                    {
@@ -3476,7 +3475,7 @@ void getSummary(const IPropertyTree* pEnvRoot, StringBuffer& respXmlStr, bool pr
          {
            linkString.clear().append(espServiceArr.item(x));
            StringArray sArray;
-           DelimToStringArray(linkString.str(), sArray, "-");
+           sArray.appendList(linkString.str(), "-");
            if(sArray.ordinality() == 3)
            {
              IPropertyTree* pEspServiceType = pSummaryTree->addPropTree("Component", createPTree("Component"));

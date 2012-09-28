@@ -16,6 +16,7 @@ project( ecl-queries )
 include(${HPCC_SOURCE_DIR}/esp/scm/smcscm.cmake)
 
 set (    SRCS
+         ${ESPSCM_GENERATED_DIR}/common_esp.cpp
          ${ESPSCM_GENERATED_DIR}/ws_workunits_esp.cpp
          ecl-queries.cpp
          ../eclcmd_shell.cpp
@@ -41,13 +42,15 @@ include_directories (
 
 ADD_DEFINITIONS( -D_CONSOLE )
 
-add_executable ( ecl-queries ${SRCS} )
+HPCC_ADD_EXECUTABLE ( ecl-queries ${SRCS} )
 add_dependencies ( ecl-queries espscm ws_workunits )
-install ( TARGETS ecl-queries DESTINATION ${DIR_NAME}/bin )
+install ( TARGETS ecl-queries RUNTIME DESTINATION ${EXEC_DIR} )
 target_link_libraries ( ecl-queries
         jlib
         esphttp
         workunit
     )
 
-install ( PROGRAMS ecl-queries.install DESTINATION ${OSSDIR}/etc/init.d/install COMPONENT Runtime )
+if (UNIX)
+install ( PROGRAMS ecl-queries.install DESTINATION etc/init.d/install COMPONENT Runtime )
+endif (UNIX)

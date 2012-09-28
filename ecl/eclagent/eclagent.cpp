@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #include "build-config.h"
@@ -1138,17 +1137,18 @@ void EclAgent::doSetResultString(type_t type, const char *name, unsigned sequenc
     }
 }
 
+//used to output a row
 void EclAgent::setResultRaw(const char * name, unsigned sequence, int len, const void *val)
 {
     LOG(MCsetresult, unknownJob, "setResultRaw(%s,%d,(%d bytes))", nullText(name), sequence, len);
     Owned<IWUResult> r = updateResult(name, sequence);
     if (r)
     {
-        r->setResultRaw(len, val, ResultFormatRaw); 
+        r->setResultRow(len, val);
         r->setResultStatus(ResultStatusCalculated);
     }
     else
-        fail(0, "Unexpected parameters to setResultString");
+        fail(0, "Unexpected parameters to setResultRaw");
     if (writeResultsToStdout && (int) sequence >= 0)
     {
         if (outputFmt == ofSTD || outputFmt==ofRAW)
@@ -1600,6 +1600,20 @@ void EclAgent::getEventExtra(size32_t & outLen, char * & outStr, const char * ta
     rtlExtractTag(outLen, outStr, text, tag, "Event");
 }
 
+char *EclAgent::getPlatform()
+{
+    if (!isStandAloneExe)
+    {
+        const char * cluster = clusterNames.tos();
+        Owned<IConstWUClusterInfo> clusterInfo = getTargetClusterInfo(cluster);
+        if (!clusterInfo)
+            throw MakeStringException(-1, "Unknown Cluster '%s'", cluster);
+        return strdup(clusterTypeString(clusterInfo->getPlatform()));
+    }
+    else
+        return strdup("standalone");
+}
+
 char *EclAgent::getEnv(const char *name, const char *defaultValue) const 
 {
     const char *val = globals->queryProp(name);
@@ -1854,7 +1868,8 @@ void EclAgent::doProcess()
             if (w->hasDebugValue("traceLevel"))
                 traceLevel = w->getDebugValueInt("traceLevel", 10);
             w->setTracingValue("EclAgentBuild", BUILD_TAG);
-            w->addProcess("EclAgent", agentTopology->queryProp("@name"), logname.str());
+            if (agentTopology->hasProp("@name"))
+                w->addProcess("EclAgent", agentTopology->queryProp("@name"), logname.str());
             if (checkVersion && ((w->getCodeVersion() > ACTIVITY_INTERFACE_VERSION) || (w->getCodeVersion() < MIN_ACTIVITY_INTERFACE_VERSION)))
                 failv(0, "Workunit was compiled for eclagent interface version %d, this eclagent requires version %d..%d", w->getCodeVersion(), MIN_ACTIVITY_INTERFACE_VERSION, ACTIVITY_INTERFACE_VERSION);
             if(noRetry && (w->getState() == WUStateFailed))
@@ -2994,12 +3009,16 @@ IGroup *EclAgent::getHThorGroup(StringBuffer &out)
     unsigned ins = 0;
     SocketEndpoint ep(0,queryMyNode()->endpoint());
     Owned<IGroup> mygrp = createIGroup(1,&ep);
-    loop {
+    loop
+    {
         Owned<IGroup> grp = queryNamedGroupStore().lookup(mygroupname.str());
         if (!grp)
             break;
         if (grp->equals(mygrp))
+        {
+            out.append(mygroupname);
             return grp.getClear();
+        }
         ins++;
         mygroupname.setLength(l);
         mygroupname.append('_').append(ins);
@@ -3007,6 +3026,7 @@ IGroup *EclAgent::getHThorGroup(StringBuffer &out)
     // this shouldn't happen but..
     WARNLOG("Adding group %s",mygroupname.str());
     queryNamedGroupStore().add(mygroupname.str(),mygrp,true);
+    out.append(mygroupname);
     return queryNamedGroupStore().lookup(mygroupname.str());
 }
 

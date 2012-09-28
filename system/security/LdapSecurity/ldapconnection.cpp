@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 // LDAP prototypes use char* where they should be using const char *, resulting in lots of spurious warnings
@@ -27,6 +26,8 @@
 #include "ldapsecurity.ipp"
 #include "jsmartsock.hpp"
 #include "jrespool.tpp"
+#include "mpbase.hpp"
+#include "dautils.hpp"
 
 #undef new
 #include <map>
@@ -52,6 +53,8 @@
 #ifdef _WIN32 
 #define LDAP_NO_ATTRS "1.1"
 #endif
+
+#define PWD_NEVER_EXPIRES (__int64)0x8000000000000000
 
 class CLoadBalancer : public CInterface, implements IInterface
 {
@@ -142,7 +145,7 @@ public:
     }
 };
 
-bool LdapServerDown(int rc)
+inline bool LdapServerDown(int rc)
 {
     return rc==LDAP_SERVER_DOWN||rc==LDAP_UNAVAILABLE||rc==LDAP_TIMEOUT;
 }
@@ -889,6 +892,7 @@ private:
     StringBuffer         m_pwscheme;
     bool                 m_domainPwdsNeverExpire;//no domain policy for password expiration
     __int64              m_maxPwdAge;
+    time_t               m_lastPwdAgeCheck;
 
     class CLDAPMessage
     {
@@ -911,6 +915,7 @@ public:
         else
             m_connections.setown(new CLdapConnectionPool(m_ldapconfig.get()));  
         m_pp = NULL;
+        m_lastPwdAgeCheck = 0;
         //m_defaultFileScopePermission = -2;
         //m_defaultWorkunitScopePermission = -2;
     }
@@ -962,12 +967,13 @@ public:
 
     virtual __int64 getMaxPwdAge()
     {
+        if ((msTick() - m_lastPwdAgeCheck) < (60*1000))
+            return m_maxPwdAge;
         char* attrs[] = {"maxPwdAge", NULL};
         CLDAPMessage searchResult;
         TIMEVAL timeOut = {LDAPTIMEOUT,0};
         Owned<ILdapConnection> lconn = m_connections->getConnection();
         LDAP* sys_ld = ((CLdapConnection*)lconn.get())->getLd();
-
         int result = ldap_search_ext_s(sys_ld, (char*)m_ldapconfig->getBasedn(), LDAP_SCOPE_BASE, NULL,
                                         attrs, 0, NULL, NULL, &timeOut, LDAP_NO_LIMIT, &searchResult.msg);
         if(result != LDAP_SUCCESS)
@@ -982,16 +988,21 @@ public:
             return 0;
         }
         char **values;
+        m_maxPwdAge = 0;
         values = ldap_get_values(sys_ld, searchResult.msg, "maxPwdAge");
-        assertex(values);
-        char *val = values[0];
-        if (*val == '-')
-            ++val;
-        __int64 maxAge = 0;
-        for (int x=0; val[x]; x++)
-            maxAge = maxAge * 10 + ( (int)val[x] - '0');
+        if (values && *values)
+        {
+            char *val = values[0];
+            if (*val == '-')
+                ++val;
+            for (int x=0; val[x]; x++)
+                m_maxPwdAge = m_maxPwdAge * 10 + ( (int)val[x] - '0');
+        }
+        else
+            m_maxPwdAge = PWD_NEVER_EXPIRES;
         ldap_value_free(values);
-        return maxAge;
+        m_lastPwdAgeCheck = msTick();
+        return m_maxPwdAge;
     }
 
     void calcPWExpiry(CDateTime &dt, unsigned len, char * val)
@@ -1017,8 +1028,8 @@ public:
             if(!username || !*username || !password || !*password)
                 return false;
 
-            m_maxPwdAge = getMaxPwdAge();
-            if (m_maxPwdAge != (__int64)0x8000000000000000)
+            getMaxPwdAge();//sets m_maxPwdAge
+            if (m_maxPwdAge != PWD_NEVER_EXPIRES)
                 m_domainPwdsNeverExpire = false;
             else
                 m_domainPwdsNeverExpire = true;
@@ -1171,6 +1182,14 @@ public:
             {
                 DBGLOG("LdapBind for user %s (retries=%d).", username, retries);
                 {
+#ifdef _DALIUSER_STACKTRACE
+                    //following debug code to be removed
+                    if (!username || !stricmp(username, "daliuser"))
+                    {
+                        DBGLOG("UNEXPECTED USER '%s' in ldapconnection.cpp line %d",username, __LINE__);
+                        PrintStackReport();
+                    }
+#endif
                     LDAP* user_ld = LdapUtils::LdapInit(m_ldapconfig->getProtocol(), hostbuf.str(), m_ldapconfig->getLdapPort(), m_ldapconfig->getLdapSecurePort());
                     rc = LdapUtils::LdapBind(user_ld, m_ldapconfig->getDomain(), username, password, userdnbuf.str(), m_ldapconfig->getServerType(), m_ldapconfig->getAuthMethod());
                     ldap_unbind(user_ld);
@@ -3232,6 +3251,11 @@ public:
                 continue;
             changeUserGroup("delete", username, grp);
         }
+
+        //Remove tempfile scope for this user
+        StringBuffer resName(queryDfsXmlBranchName(DXB_Internal));
+        resName.append("::").append(username);
+        deleteResource(RT_FILE_SCOPE, resName.str(), m_ldapconfig->getResourceBasedn(RT_FILE_SCOPE));
         
         return true;
     }
@@ -4876,6 +4900,13 @@ private:
 
         updateUser(*tmpuser, passwd);
 
+        //Add tempfile scope for this user (spill, paused and checkpoint
+        //will be created under this user specific scope)
+        StringBuffer resName(queryDfsXmlBranchName(DXB_Internal));
+        resName.append("::").append(tmpuser->getName());
+        Owned<ISecResource> resource = new CLdapSecResource(resName.str());
+        addResource(RT_FILE_SCOPE, *tmpuser, resource, PT_ADMINISTRATORS_AND_USER, m_ldapconfig->getResourceBasedn(RT_FILE_SCOPE));
+
         return true;
     }
 
@@ -5103,14 +5134,19 @@ int LdapUtils::getServerInfo(const char* ldapserver, int ldapport, StringBuffer&
             StringBuffer onedn;
             while((curdn = domains[i]) != NULL)
             {
-                if(*curdn != '\0' && (strncmp(curdn, "dc=", 3) == 0 || strncmp(curdn, "DC=", 3) == 0))
+                if(*curdn != '\0' && (strncmp(curdn, "dc=", 3) == 0 || strncmp(curdn, "DC=", 3) == 0) && strstr(curdn,"DC=ForestDnsZones")==0 && strstr(curdn,"DC=DomainDnsZones")==0 )
                 {
                     if(domainDN.length() == 0)
                     {
                         StringBuffer curdomain;
                         LdapUtils::getName(curdn, curdomain);
                         if(onedn.length() == 0)
+                        {
+                            DBGLOG("Queried '%s', selected basedn '%s'",curdn, curdomain.str());
                             onedn.append(curdomain.str());
+                        }
+                        else
+                            DBGLOG("Ignoring %s", curdn);
                         if(!domainname || !*domainname || stricmp(curdomain.str(), domainname) == 0)
                             domainDN.append(curdn);
                     }

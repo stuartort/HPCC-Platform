@@ -1,5 +1,5 @@
 /*##############################################################################
-## Copyright (c) 2011 HPCC Systems.  All rights reserved.
+## HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.  All rights reserved.
 ############################################################################## */
 
 /*
@@ -60,6 +60,12 @@ export group() := externals.group();
  */
 
 export getExpandLogicalName(const varstring name) := externals.getExpandLogicalName(name);
+
+/*
+ * Returns the name of the cluster the query is currently executing on.
+ */
+
+export cluster() := externals.cluster();
 
 /*
  * The following are either unused, or should be replaced with a different syntax.

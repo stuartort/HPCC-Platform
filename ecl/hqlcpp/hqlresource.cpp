@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 #include "platform.h"
 #include "jlib.hpp"
@@ -2292,9 +2291,10 @@ protected:
         switch (op)
         {
         case no_if:
+        case no_choose:
+        case no_chooseds:
             {
                 IHqlExpression * cond = expr->queryChild(0);
-//              bool condCanBeEvaluated = isEvaluateable(cond, true);
                 analyseExpr(cond);
                 if (expr->isDataset() || expr->isDatarow())
                     conditionalDepth++;
@@ -2335,7 +2335,6 @@ protected:
 
     void gatherAmbiguousSelectors(IHqlExpression * expr)
     {
-#ifndef ENSURE_SELSEQ_UID
         //Horrible code to try and cope with ambiguous left selectors.
         //o Tree is ambiguous so same child expression can occur in different contexts - so can't depend on the context it is found in to work out if can hoist
         //o If any selector that is hidden within child expressions matches one in scope then can't hoist it.
@@ -2401,8 +2400,6 @@ protected:
                 break;
             }
         }
-
-#endif
     }
 
     bool isEvaluateable(IHqlExpression * ds, bool ignoreInline = false)
@@ -2691,6 +2688,8 @@ bool EclResourcer::findSplitPoints(IHqlExpression * expr)
                 locator.analyseChild(expr->queryChild(0), true);
                 break;
             }
+        case no_childquery:
+            throwUnexpected();
         default:
             {
                 for (unsigned idx=first; idx < last; idx++)
@@ -2816,6 +2815,8 @@ void EclResourcer::createInitialGraph(IHqlExpression * expr, IHqlExpression * ow
                 return;
             }
         case no_if:
+        case no_choose:
+        case no_chooseds:
             //conditional nodes, the child branches are marked as conditional
             childLinkKind = UnconditionalLink;
             thisGraph->mergedConditionSource = true;
@@ -3007,6 +3008,8 @@ void EclResourcer::markAsUnconditional(IHqlExpression * expr, ResourceGraphInfo 
     switch (op)
     {
     case no_if:
+    case no_choose:
+    case no_chooseds:
         if (options.noConditionalLinks)
             break;
         if (condition)
@@ -3057,10 +3060,14 @@ void EclResourcer::markAsUnconditional(IHqlExpression * expr, ResourceGraphInfo 
 
 void EclResourcer::markConditionBranch(unsigned childIndex, IHqlExpression * expr, IHqlExpression * condition, bool wasConditional)
 {
-    IHqlExpression * child = expr->queryChild(childIndex);
+    IHqlExpression * child = queryRealChild(expr, childIndex);
     if (child)
     {
-        OwnedHqlExpr tag = createAttribute(((childIndex==1) ? trueAtom : falseAtom), LINK(expr), LINK(condition));
+        OwnedHqlExpr tag;
+        if (expr->getOperator() == no_if)
+            tag.setown(createAttribute(((childIndex==1) ? trueAtom : falseAtom), LINK(expr), LINK(condition)));
+        else
+            tag.setown(createAttribute(trueAtom, LINK(expr), LINK(condition), getSizetConstant(childIndex)));
         markAsUnconditional(child, queryResourceInfo(child)->graph, tag);
 
         queryResourceInfo(child)->setConditionSource(tag, !wasConditional);
@@ -3070,8 +3077,8 @@ void EclResourcer::markConditionBranch(unsigned childIndex, IHqlExpression * exp
 
 void EclResourcer::markCondition(IHqlExpression * expr, IHqlExpression * condition, bool wasConditional)
 {
-    markConditionBranch(1, expr, condition, wasConditional);
-    markConditionBranch(2, expr, condition, wasConditional);
+    ForEachChildFrom(i, expr, 1)
+        markConditionBranch(i, expr, condition, wasConditional);
 }
 
 void EclResourcer::markConditions(HqlExprArray & exprs)
@@ -3195,15 +3202,18 @@ bool EclResourcer::calculateResourceSpillPoints(IHqlExpression * expr, ResourceG
         }
     }
 
-    if (expr->getOperator() == no_if)
+    node_operator op = expr->getOperator();
+    if ((op == no_if) || (op == no_choose) || (op == no_chooseds))
     {
         //For conditions, spill on intersection of resources used, not union.
         CResources savedResources(*curResources);
         if (!calculateResourceSpillPoints(expr->queryChild(1), graph, *curResources, hasGoodSpillPoint, true))
-            return false;   
-        if (expr->queryChild(2))
+            return false;
+        ForEachChildFrom(i, expr, 2)
         {
-            if (!calculateResourceSpillPoints(expr->queryChild(2), graph, savedResources, hasGoodSpillPoint, true))
+            if (expr->queryChild(i)->isAttribute())
+                continue;
+            if (!calculateResourceSpillPoints(expr->queryChild(i), graph, savedResources, hasGoodSpillPoint, true))
                 return false;
             curResources->maximize(savedResources);
         }
@@ -3247,15 +3257,19 @@ void EclResourcer::insertResourceSpillPoints(IHqlExpression * expr, IHqlExpressi
     bool ok = info->graph->allocateResources(exprResources, *resourceLimit);
     assertex(ok);
 
-    if (expr->getOperator() == no_if)
+    node_operator op = expr->getOperator();
+    if ((op == no_if) || (op == no_choose) || (op == no_chooseds))
     {
         CResources savedResources(info->graph->resources);
         insertResourceSpillPoints(expr->queryChild(1), expr, originalGraph, info->graph);
-        if (expr->queryChild(2))
+
+        ForEachChildFrom(i, expr, 2)
         {
+            if (expr->queryChild(i)->isAttribute())
+                continue;
             CResources branchResources(info->graph->resources);
             info->graph->resources.set(savedResources);
-            insertResourceSpillPoints(expr->queryChild(2), expr, originalGraph, info->graph);
+            insertResourceSpillPoints(expr->queryChild(i), expr, originalGraph, info->graph);
             info->graph->resources.maximize(branchResources);
         }
     }
@@ -4177,6 +4191,8 @@ IHqlExpression * EclResourcer::doCreateResourced(IHqlExpression * expr, Resource
     switch (op)
     {
     case no_if:
+    case no_choose:
+    case no_chooseds:
         {
             ForEachChild(idx, expr)
             {

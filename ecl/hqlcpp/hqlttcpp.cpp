@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 #include "platform.h"
 #include "jlib.hpp"
@@ -878,6 +877,15 @@ YesNoOption HqlThorBoundaryTransformer::calcNormalizeThor(IHqlExpression * expr)
         }
         // default action.  Not completely convinced it is correct....
         break;
+    case no_choose:
+        if (type && (type->getTypeCode() == type_void))
+        {
+            if (resourceConditionalActions)
+            {
+                UNIMPLEMENTED;
+            }
+        }
+        break;
     case no_setresult:
         {
             IHqlExpression * value = expr->queryChild(0);
@@ -1025,7 +1033,7 @@ void ThorScalarTransformer::setTransformedSelector(IHqlExpression * expr, IHqlEx
 
 
 static HqlTransformerInfo ThorScalarTransformerInfo("ThorScalarTransformer");
-ThorScalarTransformer::ThorScalarTransformer(const HqlCppOptions & _options) : HoistingHqlTransformer(ThorScalarTransformerInfo, HTFnoteconditionalactions), options(_options)
+ThorScalarTransformer::ThorScalarTransformer(const HqlCppOptions & _options) : HoistingHqlTransformer(ThorScalarTransformerInfo, CTFnoteifactions), options(_options)
 {
     isConditionalDepth = 0;
     seenCandidate = false;
@@ -1087,6 +1095,7 @@ IHqlExpression * ThorScalarTransformer::createTransformed(IHqlExpression * expr)
     switch (op)
     {
     case no_if:
+    case no_chooseds:
         {
             bool isGuard = isFailureGuard(expr);
             HqlExprArray children;
@@ -6178,7 +6187,6 @@ IHqlExpression * WorkflowTransformer::transformRootAction(IHqlExpression * expr)
     switch (op)
     {
     case no_compound:
-        throwUnexpected();
         if (expr->isAction())
             return createCompoundWorkflow(expr);
         break;
@@ -6794,7 +6802,7 @@ inline bool isTypeToHoist(ITypeInfo * type)
 
 static HqlTransformerInfo scalarGlobalTransformerInfo("ScalarGlobalTransformer");
 ScalarGlobalTransformer::ScalarGlobalTransformer(HqlCppTranslator & _translator)
-: HoistingHqlTransformer(scalarGlobalTransformerInfo, HTFtraverseallnodes), translator(_translator)
+: HoistingHqlTransformer(scalarGlobalTransformerInfo, CTFtraverseallnodes), translator(_translator)
 {
     okToHoist = true;
     neverHoist = false;
@@ -7000,7 +7008,7 @@ IHqlExpression * ScalarGlobalTransformer::createTransformed(IHqlExpression * exp
 
 static HqlTransformerInfo explicitGlobalTransformerInfo("ExplicitGlobalTransformer");
 ExplicitGlobalTransformer::ExplicitGlobalTransformer(IWorkUnit * _wu, HqlCppTranslator & _translator)
-: HoistingHqlTransformer(explicitGlobalTransformerInfo, HTFnoteconditionalactions|HTFtraverseallnodes), translator(_translator)
+: HoistingHqlTransformer(explicitGlobalTransformerInfo, CTFnoteifactions|CTFtraverseallnodes), translator(_translator)
 {
     wu = _wu;
     isRoxie = (translator.getTargetClusterType() == RoxieCluster);
@@ -7140,7 +7148,7 @@ NewScopeMigrateTransformer::NewScopeMigrateTransformer(IWorkUnit * _wu, HqlCppTr
     wu = _wu;
     isRoxie = translator.targetRoxie();
     if (!isRoxie && !_translator.queryOptions().resourceConditionalActions)
-        setFlags(HTFnoteconditionalactions);
+        setFlags(CTFnoteifactions);
     minimizeWorkunitTemporaries = translator.queryOptions().minimizeWorkunitTemporaries;
 #ifdef REMOVE_GLOBAL_ANNOTATION
     activityDepth = 0;      // should be 0 to actually have any effect - but causes problems...
@@ -7489,15 +7497,15 @@ void AutoScopeMigrateTransformer::doAnalyseExpr(IHqlExpression * expr)
     case no_sequential:
         return;
     case no_if:
+    case no_choose:
         {
             if (expr->isAction())
             {
                 bool wasConditional = isConditional;
                 analyseExpr(expr->queryChild(0));
                 isConditional = true;
-                analyseExpr(expr->queryChild(1));
-                if (expr->queryChild(2))
-                    analyseExpr(expr->queryChild(2));
+                ForEachChildFrom(i, expr, 1)
+                    analyseExpr(expr->queryChild(i));
                 isConditional = wasConditional;
                 return;
             }
@@ -8487,6 +8495,7 @@ IHqlExpression * HqlLinkedChildRowTransformer::createTransformedBody(IHqlExpress
             ITypeInfo * type = expr->queryType();
             switch (type->getTypeCode())
             {
+            case type_dictionary:
             case type_table:
             case type_groupedtable:
                 if (expr->hasProperty(embeddedAtom))
@@ -8694,7 +8703,7 @@ IHqlExpression * HqlScopeTagger::transformSelect(IHqlExpression * expr)
     IHqlExpression * cursor = queryDatasetCursor(ds);
     if (cursor->isDataset())
     {
-        if (expr->isDataset())
+        if (expr->isDataset() || expr->isDictionary())
         {
             if (!isValidNormalizeSelector(cursor))
             {
@@ -8796,12 +8805,13 @@ IHqlExpression * HqlScopeTagger::transformNewDataset(IHqlExpression * expr, bool
     switch (op)
     {
     case no_if:
+    case no_chooseds:
         {
             HqlExprArray args;
             args.append(*transform(expr->queryChild(0)));
             args.append(*transformNewDataset(expr->queryChild(1), false));
-            if (expr->queryChild(2))
-                args.append(*transformNewDataset(expr->queryChild(2), false));
+            ForEachChildFrom(i, expr, 2)
+                args.append(*transformNewDataset(expr->queryChild(i), false));
             return expr->clone(args);
         }
     case no_addfiles:
@@ -9321,6 +9331,279 @@ void ImplicitAliasTransformer::process(HqlExprArray & exprs)
 }
 //---------------------------------------------------------------------------------------------------------------------
 
+SharedTableInfo * LeftRightTransformInfo::uses(IHqlExpression * tableBody) const
+{
+   ForEachItemIn(i, sharedTables)
+   {
+        SharedTableInfo & cur = sharedTables.item(i);
+        if (cur.dataset == tableBody)
+            return &cur;
+   }
+   return NULL;
+}
+
+void LeftRightTransformInfo::add(SharedTableInfo * table)
+{
+    sharedTables.append(*LINK(table));
+}
+
+bool LeftRightTransformInfo::noteUsed(IHqlExpression * seq)
+{
+    if (!seqs.contains(*seq))
+        seqs.append(*seq);
+
+    if (seqs.ordinality() > 1)
+    {
+        shared.setown(new SharedTableInfo(original, 0));
+        return true;
+    }
+    return false;
+}
+
+void LeftRightTransformInfo::addAmbiguity(SharedTableInfo * table)
+{
+    containsAmbiguity = true;
+    merge(table);
+}
+
+void LeftRightTransformInfo::merge(SharedTableInfo * table)
+{
+    ForEachItemIn(i, sharedTables)
+    {
+        SharedTableInfo & cur = sharedTables.item(i);
+        if (cur.dataset == table->dataset)
+        {
+            if (cur.depth < table->depth)
+                sharedTables.replace(*LINK(table), i);
+            return;
+        }
+    }
+    add(table);
+}
+
+void LeftRightTransformInfo::inherit(const LeftRightTransformInfo * other)
+{
+    ForEachItemIn(i, other->sharedTables)
+        merge(&other->sharedTables.item(i));
+}
+
+
+static HqlTransformerInfo LeftRightTransformerInfo("LeftRightTransformer");
+LeftRightTransformer::LeftRightTransformer() : NewHqlTransformer(LeftRightTransformerInfo)
+{
+    seenShared = true;
+}
+
+
+void LeftRightTransformer::analyseExpr(IHqlExpression * _expr)
+{
+    IHqlExpression * body = _expr->queryBody();
+    if (alreadyVisited(body))
+        return;
+
+    NewHqlTransformer::analyseExpr(body);
+    if (pass == 0)
+    {
+        //First pass gathers a list of selectors that are potentially ambiguous if the sequence was removed
+        IHqlExpression * left = NULL;
+        IHqlExpression * right = NULL;
+        switch (getChildDatasetType(body))
+        {
+        case childdataset_left:
+        case childdataset_datasetleft:
+            left = body->queryChild(0);
+            break;
+        case childdataset_same_left_right:
+        case childdataset_nway_left_right:
+        case childdataset_top_left_right:
+            left = body->queryChild(0);
+            right = body->queryChild(0);
+            break;
+        case childdataset_leftright:
+            left = body->queryChild(0);
+            right = body->queryChild(1);
+            break;
+        }
+
+        if (left)
+        {
+            LeftRightTransformInfo * extra = queryExtra(body);
+            IHqlExpression * selSeq = querySelSeq(body);
+            OwnedHqlExpr seq = createDummySelectorSequence();
+            extra->rawLeft.setown(createSelector(no_left, left, seq));
+            incUsage(extra->rawLeft, selSeq);
+            if (right)
+            {
+                //no_left is used deliberately in the following to avoid complications where right matches
+                //but left doesn't, causing the depths to be messed up.
+                extra->rawRight.setown(createSelector(no_left, right, seq));
+                if (extra->rawLeft != extra->rawRight)
+                    incUsage(extra->rawRight, selSeq);
+                else
+                    extra->rawRight.clear();
+            }
+        }
+    }
+    else
+    {
+        //Second pass - for each expression, gather a list of selectors that would actually be ambiguous.
+        LeftRightTransformInfo * extra = queryExtra(body);
+        IHqlExpression * rawLeft = extra->rawLeft;
+        IHqlExpression * rawRight = extra->rawRight;
+
+        //If LEFT is potentially ambiguous, then add it to the list of selectors used by this expression
+        if (rawLeft)
+        {
+            LeftRightTransformInfo * leftExtra = queryExtra(rawLeft);
+            if (leftExtra->shared)
+                extra->add(leftExtra->shared);
+        }
+        //Ditto for right
+        if (rawRight)
+        {
+            LeftRightTransformInfo * rightExtra = queryExtra(rawRight);
+            if (rightExtra->shared)
+                extra->add(rightExtra->shared);
+        }
+
+        switch (body->getOperator())
+        {
+        case no_activerow:
+        case no_filepos:
+        case no_file_logicalname:
+        case no_offsetof:
+        case no_joined:
+        case no_colon:
+        case no_globalscope:
+        case no_attr:
+            return;
+        case no_select:
+            {
+                bool isNew;
+                IHqlExpression * ds = querySelectorDataset(body, isNew);
+                if (isNew)
+                {
+                    LeftRightTransformInfo * dsExtra = queryExtra(ds->queryBody());
+                    extra->inherit(dsExtra);
+                }
+                return;
+            }
+        }
+
+        ForEachChild(i, body)
+        {
+            IHqlExpression * cur = body->queryChild(i);
+            LeftRightTransformInfo * childExtra = queryExtra(cur->queryBody());
+            //If this is one of the arguments to an operation which has an active top dataset,
+            //check to see if any of the contained expressions reference this item
+            if ((i != 0) && rawLeft)
+            {
+                SharedTableInfo * matchLeft = childExtra->uses(rawLeft);
+                SharedTableInfo * matchRight = rawRight ? childExtra->uses(rawRight) : NULL;
+                if (matchLeft || matchRight)
+                {
+                    unsigned leftDepth = matchLeft ? matchLeft->depth : 0;
+                    unsigned rightDepth = matchRight ? matchRight->depth : 0;
+                    unsigned depth = leftDepth > rightDepth ? leftDepth : rightDepth;
+                    SharedTableInfo * nested = createAmbiguityInfo(rawLeft, depth+1);
+                    extra->addAmbiguity(nested);
+                    if (rawRight)
+                    {
+                        SharedTableInfo * nested = createAmbiguityInfo(rawRight, depth+1);
+                        extra->addAmbiguity(nested);
+                    }
+                }
+            }
+            extra->inherit(childExtra);
+        }
+    }
+}
+
+void LeftRightTransformer::incUsage(IHqlExpression * expr, IHqlExpression * seq)
+{
+    //MORE: Needs to keep track of the sequences that were used with it, so know if needs disambiguating.
+    LeftRightTransformInfo * extra = queryExtra(expr);
+    if (extra->noteUsed(seq))
+        seenShared = true;
+}
+
+SharedTableInfo * LeftRightTransformer::createAmbiguityInfo(IHqlExpression * dataset, unsigned depth)
+{
+    ForEachItemIn(i, ambiguousTables)
+    {
+        SharedTableInfo & cur = ambiguousTables.item(i);
+        if ((cur.dataset == dataset) && (depth == cur.depth))
+            return &cur;
+    }
+    ambiguousTables.append(*new SharedTableInfo(dataset, depth));
+    return &ambiguousTables.tos();
+}
+
+
+ANewTransformInfo * LeftRightTransformer::createTransformInfo(IHqlExpression * expr)
+{
+    return CREATE_NEWTRANSFORMINFO(LeftRightTransformInfo, expr);
+}
+
+IHqlExpression * LeftRightTransformer::createTransformed(IHqlExpression * expr)
+{
+    IHqlExpression * body = expr->queryBody();
+    if (expr != body)
+    {
+        OwnedHqlExpr newBody = transform(body);
+        return expr->cloneAllAnnotations(newBody);
+    }
+
+    OwnedHqlExpr transformed = NewHqlTransformer::createTransformed(expr);
+    updateOrphanedSelectors(transformed, expr);
+
+    LeftRightTransformInfo * extra = queryExtra(body);
+    SharedTableInfo * matchLeft = extra->rawLeft ? extra->uses(extra->rawLeft) : NULL;
+    if (matchLeft)
+    {
+        childDatasetType dsType = getChildDatasetType(expr);
+        IHqlExpression * left = transformed->queryChild(0);
+        IHqlExpression * right = hasRight(dsType) ? (hasSameLeftRight(dsType) ? left : transformed->queryChild(1)) : NULL;
+
+        IHqlExpression * oldSelSeq = querySelSeq(expr);
+        OwnedHqlExpr newSelSeq = createSelectorSequence(matchLeft->depth);
+        OwnedHqlExpr oldLeft = createSelector(no_left, left, oldSelSeq);
+        OwnedHqlExpr newLeft = createSelector(no_left, left, newSelSeq);
+
+        //Replace dataset with an aliased variety, and remap all the selectors
+        HqlExprArray mapped;
+        replaceSelectors(mapped, transformed, 1, oldLeft, newLeft);
+
+        if (right)
+        {
+            OwnedHqlExpr oldRight = createSelector(no_right, right, oldSelSeq);
+            OwnedHqlExpr newRight = createSelector(no_right, right, newSelSeq);
+            unsigned firstArg = (hasSameLeftRight(dsType) ? 0 : 1);
+            replaceSelectors(mapped, firstArg, oldRight, newRight);
+        }
+
+        HqlExprArray args;
+        args.append(*LINK(left));
+        appendArray(args, mapped);
+        args.zap(*oldSelSeq);
+        args.append(*LINK(newSelSeq));
+        transformed.setown(transformed->clone(args));
+    }
+    return transformed.getClear();
+}
+
+void LeftRightTransformer::process(HqlExprArray & exprs)
+{
+    analyseArray(exprs, 0);
+    if (!seenShared)
+        return;
+    analyseArray(exprs, 1);
+    HqlExprArray transformed;
+    transformRoot(exprs, transformed);
+    replaceArray(exprs, transformed);
+}
+//---------------------------------------------------------------------------------------------------------------------
+
 /*
   Common up expressions so that all references to the same expression have identical symbols, annotations.
   Generally it improves the code a lot - especially when macros are used.  However there are occasional problems....
@@ -9547,7 +9830,7 @@ bool containsCompound(IHqlExpression * expr)
 
 static HqlTransformerInfo nestedCompoundTransformerInfo("NestedCompoundTransformer");
 NestedCompoundTransformer::NestedCompoundTransformer(HqlCppTranslator & _translator)
-: HoistingHqlTransformer(nestedCompoundTransformerInfo, HTFnoteconditionalactions), translator(_translator), translatorOptions(_translator.queryOptions())
+: HoistingHqlTransformer(nestedCompoundTransformerInfo, CTFnoteifactions), translator(_translator), translatorOptions(_translator.queryOptions())
 {
 }
 
@@ -9824,6 +10107,7 @@ HqlTreeNormalizer::HqlTreeNormalizer(HqlCppTranslator & _translator) : NewHqlTra
     options.constantFoldNormalize = translatorOptions.constantFoldNormalize;
     options.allowActivityForKeyedJoin = translatorOptions.allowActivityForKeyedJoin;
     options.implicitShuffle = translatorOptions.implicitBuildIndexShuffle;
+    options.transformCaseToChoose = translatorOptions.transformCaseToChoose;
     errors = translator.queryErrors();
     nextSequenceValue = 1;
 }
@@ -9928,7 +10212,7 @@ IHqlExpression * HqlTreeNormalizer::convertSelectToProject(IHqlExpression * newR
     unsigned numChildren = expr->numChildren();
     for (unsigned idx = 2; idx < numChildren; idx++)
         args.append(*transform(expr->queryChild(idx)));
-    OwnedHqlExpr project = createDataset(no_newusertable, args);
+    OwnedHqlExpr project = expr->isDictionary() ? createDictionary(no_newuserdictionary, args) : createDataset(no_newusertable, args);
     return expr->cloneAllAnnotations(project);
 }
 
@@ -10149,7 +10433,7 @@ IHqlExpression * HqlTreeNormalizer::transformActionList(IHqlExpression * expr)
 }
 
 
-IHqlExpression * HqlTreeNormalizer::transformCase(IHqlExpression * expr)
+IHqlExpression * HqlTreeNormalizer::transformCaseToIfs(IHqlExpression * expr)
 {
     unsigned max = numRealChildren(expr);
     OwnedHqlExpr testVar = transform(expr->queryChild(0));
@@ -10166,6 +10450,54 @@ IHqlExpression * HqlTreeNormalizer::transformCase(IHqlExpression * expr)
         elseExpr.setown(createIf(test.getClear(), trueExpr.getClear(), elseExpr.getClear()));
     }
     return elseExpr.getClear();
+}
+
+IHqlExpression * HqlTreeNormalizer::transformCaseToChoose(IHqlExpression * expr)
+{
+    //For the moment only convert datasets to choose format.  (Partly to test implementation.)
+    //Datarows are unlikely to benefit, and will cause additional work.
+    //Converting actions has implications for needing new activity kinds, and support in thor.
+    if (!expr->isDataset() || !options.transformCaseToChoose)
+        return transformCaseToIfs(expr);
+
+    unsigned max = numRealChildren(expr);
+    HqlExprArray branches;
+    OwnedHqlExpr testVar = transform(expr->queryChild(0));
+
+    HqlExprArray caseArgs;
+    caseArgs.append(*LINK(testVar));
+    bool isNullMapping = true;
+    for (unsigned i1=1; i1 < max-1; i1++)
+    {
+        IHqlExpression * mapto = expr->queryChild(i1);
+        OwnedHqlExpr key = transform(mapto->queryChild(0));
+        OwnedHqlExpr branch = transform(mapto->queryChild(1));
+        unsigned matchIndex = branches.find(*branch);
+        if (matchIndex == NotFound)
+        {
+            matchIndex = branches.ordinality();
+            branches.append(*branch.getClear());
+        }
+        OwnedHqlExpr value = getSizetConstant(matchIndex+1);
+        //MORE: Could calculate a delta and add/subtract it from testVar
+        if (!key->queryValue() || !matchesConstantValue(key, matchIndex+1))
+            isNullMapping = false;
+
+        caseArgs.append(*createValue(no_mapto, value->getType(), key.getClear(), LINK(value)));
+    }
+    caseArgs.append(*getSizetConstant(max-1));
+
+    HqlExprArray args;
+    if (isNullMapping)
+        args.append(*LINK(testVar));
+    else
+        args.append(*createValue(no_case, LINK(sizetType), caseArgs));
+    appendArray(args, branches);
+    args.append(*transform(expr->queryChild(max-1)));
+
+    if (expr->isDataset())
+        return createDataset(no_chooseds, args);
+    return createAction(no_choose, args);
 }
 
 IHqlExpression * HqlTreeNormalizer::transformEvaluate(IHqlExpression * expr)
@@ -10480,8 +10812,9 @@ IHqlExpression * HqlTreeNormalizer::transformTable(IHqlExpression * untransforme
 
 IHqlExpression * HqlTreeNormalizer::optimizeAssignSkip(HqlExprArray & children, IHqlExpression * expr, IHqlExpression * cond, unsigned depth)
 {
-    if (!(expr->getInfoFlags() & HEFcontainsSkip))
+    if (!containsSkip(expr))
         return LINK(expr);
+
     switch (expr->getOperator())
     {
     case no_skip:
@@ -10908,6 +11241,22 @@ IHqlExpression * HqlTreeNormalizer::createTransformed(IHqlExpression * expr)
             }
             break;
         }
+    case no_choose:
+    case no_chooseds:
+        {
+            OwnedHqlExpr cond = transform(expr->queryChild(0));
+            IValue * condValue = cond->queryValue();
+            if (condValue)
+            {
+                unsigned idx = (unsigned)condValue->getIntValue();
+                IHqlExpression * branch = queryRealChild(expr, idx);
+                if (branch)
+                    return transform(branch);
+                IHqlExpression * defaultExpr = queryLastNonAttribute(expr);
+                return transform(defaultExpr);
+            }
+            break;
+        }
     case no_and:
         {
             IHqlExpression * left = expr->queryChild(0);
@@ -10968,7 +11317,7 @@ IHqlExpression * HqlTreeNormalizer::createTransformedBody(IHqlExpression * expr)
         return LINK(expr);          // avoid creating an array in default code...
     case no_case:
         if (isVoidOrDatasetOrList(expr))
-            return transformCase(expr);
+            return transformCaseToChoose(expr);
         break;
     case no_map:
         if (isVoidOrDatasetOrList(expr))
@@ -10995,6 +11344,7 @@ IHqlExpression * HqlTreeNormalizer::createTransformedBody(IHqlExpression * expr)
             }
             return Parent::createTransformed(cleaned);
         }
+    case no_userdictionary:
     case no_usertable:
     case no_selectfields:
         {
@@ -11519,16 +11869,22 @@ IHqlExpression * HqlTreeNormalizer::createTransformedBody(IHqlExpression * expr)
 #ifdef USE_SELSEQ_UID
             if (name == _selectorSequence_Atom)
             {
-#ifndef ENSURE_SELSEQ_UID
+                //Purely for testing what effect adding the unique sequences has on the parse time
                 if (options.simplifySelectorSequence)
                     return createDummySelectorSequence();
-#endif
 
                 //Ensure parameterised sequences generate a unique sequence number...
                 //Not sure the following is really necessary, but will reduce in memory tree size....
                 //also saves complications from having weird attributes in the tree
                 if (expr->numChildren() > 0)
+                {
+                    //Make sure we ignore any line number information on the parameters mangled with the uid - otherwise
+                    //they may create too many unique ids.
+                    IHqlExpression * normalForm = queryLocationIndependent(expr);
+                    if (normalForm != expr)
+                        return transform(normalForm);
                     return createSelectorSequence();
+                }
             }
 #endif
             break;
@@ -11760,14 +12116,13 @@ void normalizeHqlTree(HqlCppTranslator & translator, HqlExprArray & exprs)
         LeftRightSelectorNormalizer transformer(translator.queryOptions().allowAmbiguousSelector);
 
         transformer.analyseArray(exprs, 0);
-#ifndef ENSURE_SELSEQ_UID
+
         if (!transformer.containsAmbiguity())
         {
             HqlExprArray transformed;
             transformer.transformRoot(exprs, transformed);
             replaceArray(exprs, transformed);
         }
-#endif
     }
 #endif
 
@@ -11948,13 +12303,16 @@ IHqlExpression * HqlCppTranslator::separateLibraries(IHqlExpression * query, Hql
 }
 
 
-bool HqlCppTranslator::transformGraphForGeneration(IHqlExpression * query, WorkflowArray & workflow)
+bool HqlCppTranslator::transformGraphForGeneration(HqlQueryContext & query, WorkflowArray & workflow)
 {
     HqlExprArray exprs;
-    if (isLibraryScope(query))
-        outputLibrary->mapLogicalToImplementation(exprs, query);
+    if (isLibraryScope(query.expr))
+        outputLibrary->mapLogicalToImplementation(exprs, query.expr);
     else
-        query->unwindList(exprs, no_comma);
+        query.expr->unwindList(exprs, no_comma);
+
+    //Ensure the incoming query will be freed up when no longer used
+    query.expr.clear();
 
     traceExpressions("before transform graph for generation", exprs);
     //Don't change the engine if libraries are involved, otherwise things will get very confused.
@@ -12035,6 +12393,20 @@ bool HqlCppTranslator::transformGraphForGeneration(IHqlExpression * query, Workf
     traceExpressions("workflow", workflow);
     checkNormalized(workflow);
     DEBUG_TIMER("EclServer: tree transform: stored results", msTick()-time4);
+
+#ifdef USE_SELSEQ_UID
+    if (options.normalizeSelectorSequence)
+    {
+        unsigned time = msTick();
+        ForEachItemIn(i, workflow)
+        {
+            LeftRightTransformer normalizer;
+            normalizer.process(workflow.item(i).queryExprs());
+        }
+        DEBUG_TIMERX(queryTimeReporter(), "EclServer: tree transform: left right", msTick()-time);
+        //traceExpressions("after implicit alias", workflow);
+    }
+#endif
 
     if (queryOptions().createImplicitAliases)
     {

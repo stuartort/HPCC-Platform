@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 -->
 
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
@@ -45,6 +44,7 @@
                          {
                            document.getElementById('TopSelectAll').checked = select;
                            document.getElementById('BottomSelectAll').checked = select;
+                           document.getElementById('removeSuperfile').checked = select;
                            selectAll(select);
                          }
                          function onRowCheck(checked)
@@ -148,9 +148,6 @@
                 <p/>
                 <form id="listitems" action="/WsDfu/SuperfileAction">
                 <xsl:apply-templates select="subfiles" mode="list"/>
-                <input type="hidden" name="superfile" value="{Name}"/>
-                </form>
-                <form action="/WsDfu/SuperfileAddRaw">
                 <input type="hidden" name="superfile" value="{Name}"/>
                 <p/>
                 <table xmlns="" name="table1">
@@ -366,7 +363,7 @@
         <tr class="grey">
         <th>
         <xsl:if test="Item[2]">
-            <xsl:attribute name="name">selectAll1</xsl:attribute>
+            <xsl:attribute name="id">selectAll1</xsl:attribute>
             <input type="checkbox" id="TopSelectAll" title="Select or deselect all subfiles" onclick="selectAll0(this.checked)"/>
         </xsl:if>
         </th>
@@ -390,12 +387,27 @@
             </tr>
             </table>
         </xsl:if>
-        <table id="btnTable" style="margin:20 0 0 0">
-        <colgroup>
-            <col span="8" width="100"/>
-        </colgroup>
+        <table id="btnTable" style="margin:0 0 20 20">
+            <tr>
+                <td>
+                    <xsl:if test="Item[1]">
+                        <input type="checkbox" id="removeSuperfile" name="removeSuperfile" title="Remove Superfile when the file has no subfile" disabled="true">Remove Superfile</input>
+                    </xsl:if>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <xsl:choose>
+                        <xsl:when test="Item[1]">
+                            <input type="submit" class="sbutton" id="deleteBtn" name="action" value="remove" disabled="true" onclick="return confirm('Are you sure you want to delete the following subfiles ?\n\n'+getSelected(document.forms['listitems']).substring(1,1000))"/>
+                        </xsl:when>
+                        <xsl:otherwise>
+                            <input type="button" class="sbutton" id="deleteBtn" value="Delete" onclick="submitaction('Delete','{../Name}@{../Cluster}')"/>
+                        </xsl:otherwise>
+                    </xsl:choose>
+                </td>
+            </tr>
         </table>
-        <input type="submit" class="sbutton" id="deleteBtn" name="action" value="remove" disabled="true" onclick="return confirm('Are you sure you want to delete the following subfiles ?\n\n'+getSelected(document.forms['listitems']).substring(1,1000))"/>
     </xsl:template>
 
     <xsl:template match="Item" mode="list">

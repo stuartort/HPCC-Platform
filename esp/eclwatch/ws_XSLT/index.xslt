@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 -->
 
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
@@ -597,17 +596,35 @@
                         </xsl:call-template>
                     </xsl:for-each>
 
-                    <xsl:call-template name="show-server">
-                        <xsl:with-param name="workunits" select="//Running/ActiveWorkunit[Server='ECLagent']"/>
-                    </xsl:call-template>
+                    <xsl:for-each select="ServerJobQueues/ServerJobQueue[ServerType='ECLagent']">
+                        <xsl:call-template name="show-queue">
+                            <xsl:with-param name="workunits" select="//Running/ActiveWorkunit[Server='ECLagent' and QueueName=current()/QueueName]"/>
+                            <xsl:with-param name="cluster" select="ServerName"/>
+                            <xsl:with-param name="clusterType" select="ServerType"/>
+                            <xsl:with-param name="queue" select="QueueName"/>
+                            <xsl:with-param name="status" select="QueueStatus"/>
+                        </xsl:call-template>
+                    </xsl:for-each>
 
-                    <xsl:call-template name="show-server">
-                        <xsl:with-param name="workunits" select="//Running/ActiveWorkunit[Server='ECLCCserver']"/>
-                    </xsl:call-template>
+                    <xsl:for-each select="ServerJobQueues/ServerJobQueue[ServerType='ECLCCserver']">
+                        <xsl:call-template name="show-queue">
+                            <xsl:with-param name="workunits" select="//Running/ActiveWorkunit[Server='ECLCCserver' and QueueName=current()/QueueName]"/>
+                            <xsl:with-param name="cluster" select="ServerName"/>
+                            <xsl:with-param name="clusterType" select="ServerType"/>
+                            <xsl:with-param name="queue" select="QueueName"/>
+                            <xsl:with-param name="status" select="QueueStatus"/>
+                        </xsl:call-template>
+                    </xsl:for-each>
 
-                    <xsl:call-template name="show-server">
-                        <xsl:with-param name="workunits" select="//Running/ActiveWorkunit[Server='DFUserver']"/>
-                    </xsl:call-template>
+                    <xsl:for-each select="ServerJobQueues/ServerJobQueue[ServerType='DFUserver']">
+                        <xsl:call-template name="show-queue">
+                            <xsl:with-param name="workunits" select="//Running/ActiveWorkunit[Server='DFUserver' and QueueName=current()/QueueName]"/>
+                            <xsl:with-param name="cluster" select="ServerName"/>
+                            <xsl:with-param name="clusterType" select="ServerType"/>
+                            <xsl:with-param name="queue" select="QueueName"/>
+                            <xsl:with-param name="status" select="QueueStatus"/>
+                        </xsl:call-template>
+                    </xsl:for-each>
                     <xsl:apply-templates select="DFUJobs"/>
                 </form>
                 <xsl:if test="SuperUser">
@@ -708,8 +725,14 @@
                         <xsl:when test="$clusterType = 'HTHOR'">
                             <xsl:value-of select="concat('mn_3_', $pid)"/>
                         </xsl:when>
-                        <xsl:otherwise>
+                        <xsl:when test="$clusterType = 'ECLCCserver'">
                             <xsl:value-of select="concat('mn_4_', $pid)"/>
+                        </xsl:when>
+                        <xsl:when test="$clusterType = 'DFUserver'">
+                            <xsl:value-of select="concat('mn_5_', $pid)"/>
+                        </xsl:when>
+                        <xsl:otherwise>
+                            <xsl:value-of select="concat('mn_6_', $pid)"/>
                         </xsl:otherwise>
                     </xsl:choose>
                 </xsl:variable>
@@ -723,6 +746,22 @@
                     </xsl:if>
                     <a>
                         <xsl:choose>
+                            <xsl:when test="$clusterType = 'DFUserver' or $clusterType = 'ECLCCserver' or $clusterType = 'ECLagent'">
+                                <xsl:choose>
+                                    <xsl:when test="$status='paused'">
+                                        <xsl:attribute name="class">thorrunningpausedqueuejobs</xsl:attribute>
+                                        <xsl:attribute name="title">Queue paused</xsl:attribute>
+                                    </xsl:when>
+                                    <xsl:when test="$status='stopped'">
+                                        <xsl:attribute name="class">thorrunningpausedqueuejobs</xsl:attribute>
+                                        <xsl:attribute name="title">Queue stopped</xsl:attribute>
+                                    </xsl:when>
+                                    <xsl:otherwise>
+                                        <xsl:attribute name="class">thorrunning</xsl:attribute>
+                                        <xsl:attribute name="title">Queue running</xsl:attribute>
+                                    </xsl:otherwise>
+                                </xsl:choose>
+                            </xsl:when>
                             <xsl:when test="$status2='1'">
                                 <xsl:attribute name="class">thorrunningpausedqueuejobs</xsl:attribute>
                                 <xsl:attribute name="title">Queue paused - Cluster running</xsl:attribute>
@@ -748,11 +787,13 @@
                             <xsl:attribute name="href">javascript:go('/WsTopology/TpClusterInfo?Name=<xsl:value-of select="$cluster"/>')</xsl:attribute>
                         </xsl:if>
                         <xsl:choose>
-                            <xsl:when test="$clusterType = 'ROXIE'">RoxieCluster - </xsl:when>
-                            <xsl:when test="$clusterType = 'THOR'">ThorCluster - </xsl:when>
-                            <xsl:when test="$clusterType = 'HTHOR'">HThorCluster - </xsl:when>
+                            <xsl:when test="$clusterType = 'ROXIE'">RoxieCluster - <xsl:value-of select="$cluster"/></xsl:when>
+                            <xsl:when test="$clusterType = 'THOR'">ThorCluster - <xsl:value-of select="$cluster"/></xsl:when>
+                            <xsl:when test="$clusterType = 'HTHOR'">HThorCluster - <xsl:value-of select="$cluster"/></xsl:when>
+                            <xsl:otherwise>
+                                <xsl:value-of select="$clusterType"/> - <xsl:value-of select="$queue"/>
+                            </xsl:otherwise>
                         </xsl:choose>
-                        <xsl:value-of select="$cluster"/>
                     </a>
                 </td>
             </tr>

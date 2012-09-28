@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
 "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd">
-<book xml:base="../../">
+<book>
   <bookinfo>
     <title>Client Tools Component ECL CLI</title>
 
@@ -103,25 +103,126 @@
             </tbody>
           </tgroup>
         </informaltable>
+
+        <para></para>
+
+        <sect3 role="brk">
+          <title>ecl.ini</title>
+
+          <para>Many options can be placed in a file called <emphasis
+          role="bold">ecl.ini</emphasis> in the local directory. Options that
+          do not change very often should be put in the ini file. For
+          example:</para>
+
+          <programlisting>eclWatchIP=10.150.50.12
+eclWatchPort=28010
+eclUserName=emilykate
+eclPassword=elmo812
+resultLimit=200
+</programlisting>
+
+          <para>In some examples below, we'll assume ecl.ini has the above
+          content.</para>
+
+          <para><informaltable colsep="1" frame="all" rowsep="1">
+              <tgroup cols="2">
+                <colspec colwidth="49.50pt" />
+
+                <colspec />
+
+                <tbody>
+                  <row>
+                    <entry><graphic fileref="images/caution.png" scale="noin"
+                    xml:base="../../" /></entry>
+
+                    <entry>We do not recommend storing your password in the
+                    INI file (which is clear text). The password is included
+                    in the INI file for these examples to simplify the example
+                    code.</entry>
+                  </row>
+                </tbody>
+              </tgroup>
+            </informaltable></para>
+
+          <para>The following options can be provided in an ini file:
+          eclWatchIP, eclWatchPort, eclUserName, eclPassword, activateDefault,
+          waitTimeout, resultLimit.</para>
+
+          <para>Evaluation of options follows this order of precedence:</para>
+
+          <itemizedlist>
+            <listitem>
+              <para>command line</para>
+            </listitem>
+
+            <listitem>
+              <para>ini file</para>
+            </listitem>
+
+            <listitem>
+              <para>environment variable</para>
+            </listitem>
+
+            <listitem>
+              <para>default value</para>
+            </listitem>
+          </itemizedlist>
+        </sect3>
+
+        <sect3 role="brk">
+          <title>Environment Variables</title>
+
+          <para>Some options can be stored in Environment Variables on your
+          machine. The following options are supported:</para>
+
+          <programlisting>ECL_WATCH_IP
+ECL_WATCH_PORT
+ECL_USER_NAME
+ECL_PASSWORD
+ECL_WAIT_TIMEOUT
+ECL_RESULT_LIMIT
+</programlisting>
+
+          <para></para>
+
+          <para><informaltable colsep="1" frame="all" rowsep="1">
+              <tgroup cols="2">
+                <colspec colwidth="49.50pt" />
+
+                <colspec />
+
+                <tbody>
+                  <row>
+                    <entry><graphic fileref="images/caution.png" scale="noin"
+                    xml:base="../../" /></entry>
+
+                    <entry>We do not recommend storing your password in an
+                    Environment Variable unless your system is
+                    secured.</entry>
+                  </row>
+                </tbody>
+              </tgroup>
+            </informaltable></para>
+        </sect3>
       </sect2>
 
       <sect2 role="brk">
         <title>ecl deploy</title>
 
-        <para><emphasis role="bold">ecl deploy --cluster=&lt;value&gt;
+        <para><emphasis role="bold">ecl deploy --target=&lt;value&gt;
         --name=&lt;value&gt; &lt;ecl_file | - &gt; </emphasis></para>
 
-        <para><emphasis role="bold">ecl deploy --cluster=&lt;value&gt;
+        <para><emphasis role="bold">ecl deploy --target=&lt;value&gt;
         --name=&lt;value&gt; &lt;archive | - &gt; </emphasis></para>
 
-        <para><emphasis role="bold">ecl deploy [--cluster=&lt;value&gt;]
+        <para><emphasis role="bold">ecl deploy [--target=&lt;value&gt;]
         [--name=&lt;value&gt;] &lt;so | dll | - &gt;</emphasis></para>
 
         <para>Examples:</para>
 
-        <programlisting>ecl deploy --cluster=roxie --name=FindPersonService findperson.ecl
-ecl deploy --cluster=roxie --name=FindPersonService ArchiveQuery.xml
-ecl deploy --cluster=roxie --name=FindPersonService libW20120224-125557.so
+        <programlisting>ecl deploy --target=roxie --name=FindPersonService findperson.ecl
+ecl deploy --target=roxie --name=FindPersonService ArchiveQuery.xml
+ecl deploy --target=roxie --name=FindPersonService libW20120224-125557.so
 </programlisting>
 
         <para>A hyphen (-) specifies that the object should be read from
@@ -168,9 +269,9 @@ ecl deploy --cluster=roxie --name=FindPersonService libW20120224-125557.so
                 </row>
 
                 <row>
-                  <entry>-cl, --cluster</entry>
+                  <entry>-t, --target</entry>
 
-                  <entry>The cluster to associate workunit with</entry>
+                  <entry>The target cluster to associate workunit with</entry>
                 </row>
 
                 <row>
@@ -258,27 +359,29 @@ ecl deploy --cluster=roxie --name=FindPersonService libW20120224-125557.so
       <sect2 role="brk">
         <title>ecl publish</title>
 
-        <para><emphasis role="bold">ecl publish [--cluster=&lt;val&gt;]
-        [--name=&lt;val&gt;] [--activate] &lt;wuid&gt; </emphasis></para>
-
-        <para><emphasis role="bold">ecl publish [--cluster=&lt;val&gt;]
-        [--name=&lt;val&gt;] [--activate] &lt;so | dll | -
-        &gt;</emphasis></para>
-
-        <para><emphasis role="bold">ecl publish --cluster=&lt;val&gt;
-        --name=&lt;val&gt; [--activate] &lt;archive | - &gt;
+        <para><emphasis role="bold">ecl publish [--target=&lt;val&gt;]
+        [--name=&lt;val&gt;] [--activate | --no-activate] &lt;wuid&gt;
         </emphasis></para>
 
-        <para><emphasis role="bold">ecl publish --cluster=&lt;val&gt;
-        --name=&lt;val&gt; [--activate] &lt;ecl_file | -
+        <para><emphasis role="bold">ecl publish [--target=&lt;val&gt;]
+        [--name=&lt;val&gt;] [--activate | --no-activate] &lt;so | dll | -
+        &gt;</emphasis></para>
+
+        <para><emphasis role="bold">ecl publish --target=&lt;val&gt;
+        --name=&lt;val&gt; [--activate | --no-activate] &lt;archive | - &gt;
+        </emphasis></para>
+
+        <para><emphasis role="bold">ecl publish --target=&lt;val&gt;
+        --name=&lt;val&gt; [--activate | --no-activate] &lt;ecl_file | -
         &gt;</emphasis></para>
 
         <para>Examples:</para>
 
-        <programlisting>ecl publish --cluster=roxie --name=FindPersonService -A W20120224-125557
-ecl publish --cluster=roxie --name=FindPersonService -A libW20120224-125557.so
-ecl publish --cluster=roxie --name=FindPersonService -A ArchiveQuery.xml
-ecl publish --cluster=roxie --name=FindPersonService --activate findperson.ecl
+        <programlisting>ecl publish --target=roxie --name=FindPersonService -A W20120224-125557
+ecl publish --target=roxie --name=FindPersonService -A libW20120224-125557.so
+ecl publish --target=roxie --name=FindPersonService -A ArchiveQuery.xml
+ecl publish --target=roxie --name=FindPersonService --activate findperson.ecl
+ecl publish --target=roxie --name=FindPersonService --no-activate findperson.ecl
 </programlisting>
 
         <para>A hyphen (-) specifies that the object should be read from
@@ -331,9 +434,9 @@ ecl publish --cluster=roxie --name=FindPersonService --activate findperson.ecl
                 </row>
 
                 <row>
-                  <entry>-cl, --cluster</entry>
+                  <entry>-t, --target</entry>
 
-                  <entry>The cluster to associate workunit with</entry>
+                  <entry>The target cluster to associate workunit with</entry>
                 </row>
 
                 <row>
@@ -345,7 +448,19 @@ ecl publish --cluster=roxie --name=FindPersonService --activate findperson.ecl
                 <row>
                   <entry>-A, --activate</entry>
 
-                  <entry>Activates query when published</entry>
+                  <entry>Activates query when published (default)</entry>
+                </row>
+
+                <row>
+                  <entry>-A-, --no-activate</entry>
+
+                  <entry>Does not activate query when published</entry>
+                </row>
+
+                <row>
+                  <entry>--no-reload</entry>
+
+                  <entry>Does not reload the queryset</entry>
                 </row>
 
                 <row>
@@ -439,7 +554,9 @@ ecl publish --cluster=roxie --name=FindPersonService --activate findperson.ecl
 
         <para><emphasis role="bold">Example:</emphasis></para>
 
-        <programlisting>ecl unpublish Roxie FindpersonService.1</programlisting>
+        <programlisting>ecl unpublish roxie FindpersonService.1
+ecl unpublish roxie "FindpersonService*"
+</programlisting>
 
         <para></para>
 
@@ -470,7 +587,8 @@ ecl publish --cluster=roxie --name=FindPersonService --activate findperson.ecl
                 <row>
                   <entry>query</entry>
 
-                  <entry>The query to remove from query set</entry>
+                  <entry>The query to remove from query set. Wildcards
+                  allowed, but must be in quotes (e.g., "MyQuery*" ).</entry>
                 </row>
 
                 <row>
@@ -516,32 +634,32 @@ ecl publish --cluster=roxie --name=FindPersonService --activate findperson.ecl
         <title>ecl run</title>
 
         <para><emphasis role="bold">ecl run
-        [--cluster=&lt;val&gt;][--input=&lt;file|xml&gt;][--wait=&lt;ms&gt;]
+        [--target=&lt;val&gt;][--input=&lt;file|xml&gt;][--wait=&lt;ms&gt;]
         &lt;wuid&gt; </emphasis></para>
 
         <para><emphasis role="bold">ecl run
-        [--cluster=&lt;c&gt;][--input=&lt;file|xml&gt;][--wait=&lt;ms&gt;]
+        [--target=&lt;c&gt;][--input=&lt;file|xml&gt;][--wait=&lt;ms&gt;]
         &lt;queryset&gt; &lt;query&gt; </emphasis></para>
 
         <para><emphasis role="bold">ecl run
-        [--cluster=&lt;c&gt;][--name=&lt;nm&gt;][--input=&lt;file|xml&gt;][--wait=&lt;i&gt;]
+        [--target=&lt;c&gt;][--name=&lt;nm&gt;][--input=&lt;file|xml&gt;][--wait=&lt;i&gt;]
         &lt;dll|-&gt; </emphasis></para>
 
-        <para><emphasis role="bold">ecl run --cluster=&lt;c&gt;
+        <para><emphasis role="bold">ecl run --target=&lt;c&gt;
         --name=&lt;nm&gt; [--input=&lt;file|xml&gt;][--wait=&lt;i&gt;]
         &lt;archive|-&gt; </emphasis></para>
 
-        <para><emphasis role="bold">ecl run --cluster=&lt;c&gt;
+        <para><emphasis role="bold">ecl run --target=&lt;c&gt;
         --name=&lt;nm&gt; [--input=&lt;file|xml&gt;][--wait=&lt;i&gt;]
         &lt;eclfile|-&gt;</emphasis></para>
 
         <para><emphasis role="bold">Examples</emphasis>:</para>
 
-        <programlisting>ecl run --cluster=thor --input=data.xml --wait=1000 W20120224-125557
-ecl run --cluster=thor --input=data.xml --wait=1000 thor findpersonservice
-ecl run --cluster=thor --input=data.xml --wait=1000 ArchiveQuery.xml
-ecl run --cluster=thor --input=data.xml --wait=1000 findperson.ecl
-ecl run --cluster=thor --input="&lt;request&gt;&lt;LName&gt;JONES&lt;/LName&gt;&lt;/request&gt;" findperson.ecl
+        <programlisting>ecl run --target=thor --input=data.xml --wait=1000 W20120224-125557
+ecl run --target=thor --input=data.xml --wait=1000 thor findpersonservice
+ecl run --target=thor --input=data.xml --wait=1000 ArchiveQuery.xml
+ecl run --target=thor --input=data.xml --wait=1000 findperson.ecl
+ecl run --target=thor --input="&lt;request&gt;&lt;LName&gt;JONES&lt;/LName&gt;&lt;/request&gt;" findperson.ecl
 </programlisting>
 
         <para>A hyphen (-) specifies that the object should be read from
@@ -594,9 +712,9 @@ ecl run --cluster=thor --input="&lt;request&gt;&lt;LName&gt;JONES&lt;/LName&gt;&
                 </row>
 
                 <row>
-                  <entry>-cl, --cluster</entry>
+                  <entry>-t, --target</entry>
 
-                  <entry>The cluster to associate workunit with</entry>
+                  <entry>The target cluster to associate workunit with</entry>
                 </row>
 
                 <row>
@@ -860,7 +978,7 @@ ecl run --cluster=thor --input="&lt;request&gt;&lt;LName&gt;JONES&lt;/LName&gt;&
         <title id="eclquerieslist">ecl queries list</title>
 
         <para><emphasis role="bold">ecl queries list
-        [&lt;queryset&gt;][--cluster=&lt;cluster&gt;][--show=&lt;flags&gt;]</emphasis></para>
+        [&lt;queryset&gt;][--target=&lt;cluster&gt;][--show=&lt;flags&gt;]</emphasis></para>
 
         <para><emphasis role="bold"></emphasis></para>
 
@@ -906,9 +1024,9 @@ ecl queries list roxie myroxie --show=A </programlisting>
                 </row>
 
                 <row>
-                  <entry>-cl, --cluster</entry>
+                  <entry>-t, --target</entry>
 
-                  <entry>The cluster associated with the queries to
+                  <entry>The target cluster associated with the queries to
                   list</entry>
                 </row>
 
@@ -1041,10 +1159,22 @@ ecl queries copy //192.168.1.10:8010/thor/findperson thor
                 </row>
 
                 <row>
-                  <entry>-cl, --cluster</entry>
+                  <entry>-t, --target</entry>
 
-                  <entry>The cluster to associate with the remote
+                  <entry>The target cluster to associate with the remote
                   workunit</entry>
+                </row>
+
+                <row>
+                  <entry>--no-reload</entry>
+
+                  <entry>Does not reload the queryset</entry>
+                </row>
+
+                <row>
+                  <entry>-A, --activate</entry>
+
+                  <entry>Activates query when copied</entry>
                 </row>
 
                 <row>
@@ -1089,7 +1219,7 @@ ecl queries copy //192.168.1.10:8010/thor/findperson thor
           </informaltable></para>
       </sect2>
 
-      <sect2 role="brk">
+      <sect2 id="eclpackageadd" role="brk">
         <title>ecl package add</title>
 
         <para><emphasis role="bold">ecl package add [options]
@@ -1179,7 +1309,7 @@ ecl package add --queryset=roxie mypkg.pkg --overwritename=false
           </informaltable></para>
       </sect2>
 
-      <sect2 role="brk">
+      <sect2 id="eclpackagecopyfiles" role="brk">
         <title>ecl package copyFiles</title>
 
         <para><emphasis role="bold">ecl package copyFiles [options]
@@ -1270,7 +1400,7 @@ ecl package copyFiles
           </informaltable></para>
       </sect2>
 
-      <sect2 role="brk">
+      <sect2 id="eclpackagedelete" role="brk">
         <title>ecl package delete</title>
 
         <para><emphasis role="bold">ecl package delete [options]
@@ -1353,7 +1483,7 @@ ecl package delete --queryset=roxie mypkg.pkg --overwritename=false
           </informaltable></para>
       </sect2>
 
-      <sect2 role="brk">
+      <sect2 id="eclpackageactivate" role="brk">
         <title>ecl package activate</title>
 
         <para><emphasis role="bold">ecl package activate [options]
@@ -1434,7 +1564,7 @@ ecl package delete --queryset=roxie mypkg.pkg --overwritename=false
           </informaltable></para>
       </sect2>
 
-      <sect2 role="brk">
+      <sect2 id="eclpackagedeactivate" role="brk">
         <title>ecl package deactivate</title>
 
         <para><emphasis role="bold">ecl package deactivate [options]
@@ -1515,7 +1645,7 @@ ecl package delete --queryset=roxie mypkg.pkg --overwritename=false
           </informaltable></para>
       </sect2>
 
-      <sect2 role="brk">
+      <sect2 id="eclpackagelist" role="brk">
         <title>ecl package list</title>
 
         <para><emphasis role="bold">ecl package list
@@ -1524,7 +1654,7 @@ ecl package delete --queryset=roxie mypkg.pkg --overwritename=false
         <para>Examples:</para>
 
         <programlisting>ecl package list
-ecl package list --cluster=roxie
+ecl package list --process=roxie
 </programlisting>
 
         <para></para>
@@ -1557,11 +1687,104 @@ ecl package list --cluster=roxie
                 </row>
 
                 <row>
-                  <entry>--cluster</entry>
+                  <entry>--process</entry>
 
-                  <entry>The name of the cluster from which to list
-                  information. Default is all clusters associated with the
-                  Dali server.</entry>
+                  <entry>The name of the process cluster for which to list
+                  information. Default is all process clusters associated with
+                  the Dali server.</entry>
+                </row>
+
+                <row>
+                  <entry>-v, --verbose</entry>
+
+                  <entry>Output additional tracing information</entry>
+                </row>
+
+                <row>
+                  <entry>-s, --server</entry>
+
+                  <entry>The IP Address of ESP server running eclwatch
+                  services</entry>
+                </row>
+
+                <row>
+                  <entry>--port</entry>
+
+                  <entry>The eclwatch services port (Default is 8010)</entry>
+                </row>
+
+                <row>
+                  <entry>-u, --username</entry>
+
+                  <entry>The username (if necessary)</entry>
+                </row>
+
+                <row>
+                  <entry>-pw, --password</entry>
+
+                  <entry>The password (if necessary)</entry>
+                </row>
+              </tbody>
+            </tgroup>
+          </informaltable></para>
+      </sect2>
+
+      <sect2 id="eclpackageinfo" role="brk">
+        <title>ecl package info</title>
+
+        <para><emphasis role="bold">ecl package info [options]
+        [--process=&lt;processCluster&gt; |
+        --packageName=MyPackage]</emphasis></para>
+
+        <para>Examples:</para>
+
+        <programlisting>ecl package info --packageName=mypackage
+ecl package list --process=myroxie
+</programlisting>
+
+        <para>Specify either --process or packageName.</para>
+
+        <para><informaltable colsep="0" frame="none" rowsep="0">
+            <tgroup cols="2">
+              <colspec align="left" colwidth="125.55pt" />
+
+              <colspec colwidth="384.85pt" />
+
+              <tbody>
+                <row>
+                  <entry>ecl package list</entry>
+
+                  <entry>Calls the package list command</entry>
+                </row>
+
+                <row>
+                  <entry><emphasis role="bold">Actions</emphasis></entry>
+                </row>
+
+                <row>
+                  <entry>list</entry>
+
+                  <entry>Lists loaded package names</entry>
+                </row>
+
+                <row>
+                  <entry><emphasis role="bold">Options</emphasis></entry>
+                </row>
+
+                <row>
+                  <entry>--packageName</entry>
+
+                  <entry>The name of the package from which to list
+                  information. (Specify either --process or
+                  packageName)</entry>
+                </row>
+
+                <row>
+                  <entry>--process</entry>
+
+                  <entry>The name of the process cluster for which to list
+                  information. (Specify either --process or
+                  packageName)</entry>
                 </row>
 
                 <row>
@@ -1600,19 +1823,17 @@ ecl package list --cluster=roxie
       </sect2>
 
       <sect2 role="brk">
-        <title>ecl package info</title>
+        <title>ecl roxie attach</title>
 
-        <para><emphasis role="bold">ecl package info [options]
-        [--cluster=&lt;clusterName&gt; |
-        --packageName=MyPackage]</emphasis></para>
+        <para><emphasis role="bold">ecl roxie attach
+        &lt;processName&gt;</emphasis></para>
 
         <para>Examples:</para>
 
-        <programlisting>ecl package info --packageName=mypackage
-ecl package list --cluster=roxie
+        <programlisting>ecl roxie attach myroxie
 </programlisting>
 
-        <para>Specify either --cluster or packageName.</para>
+        <para></para>
 
         <para><informaltable colsep="0" frame="none" rowsep="0">
             <tgroup cols="2">
@@ -1622,19 +1843,9 @@ ecl package list --cluster=roxie
 
               <tbody>
                 <row>
-                  <entry>ecl package list</entry>
+                  <entry>ecl roxie attach</entry>
 
-                  <entry>Calls the package list command</entry>
-                </row>
-
-                <row>
-                  <entry><emphasis role="bold">Actions</emphasis></entry>
-                </row>
-
-                <row>
-                  <entry>list</entry>
-
-                  <entry>Lists loaded package names</entry>
+                  <entry>Attach the roxie to Dali</entry>
                 </row>
 
                 <row>
@@ -1642,19 +1853,198 @@ ecl package list --cluster=roxie
                 </row>
 
                 <row>
-                  <entry>--packageName</entry>
+                  <entry>-v, --verbose</entry>
 
-                  <entry>The name of the package from which to list
-                  information. (Specify either --cluster or
-                  packageName)</entry>
+                  <entry>Output additional tracing information</entry>
                 </row>
 
                 <row>
-                  <entry>--cluster</entry>
+                  <entry>-s, --server</entry>
 
-                  <entry>The name of the cluster from which to list
-                  information. (Specify either --cluster or
-                  packageName)</entry>
+                  <entry>The IP Address of ESP server running eclwatch
+                  services</entry>
+                </row>
+
+                <row>
+                  <entry>--port</entry>
+
+                  <entry>The eclwatch services port (Default is 8010)</entry>
+                </row>
+
+                <row>
+                  <entry>-u, --username</entry>
+
+                  <entry>The username (if necessary)</entry>
+                </row>
+
+                <row>
+                  <entry>-pw, --password</entry>
+
+                  <entry>The password (if necessary)</entry>
+                </row>
+              </tbody>
+            </tgroup>
+          </informaltable></para>
+      </sect2>
+
+      <sect2 role="brk">
+        <title>ecl roxie detach</title>
+
+        <para><emphasis role="bold">ecl roxie attach
+        &lt;processName&gt;</emphasis></para>
+
+        <para>Examples:</para>
+
+        <programlisting>ecl roxie detach myroxie
+</programlisting>
+
+        <para></para>
+
+        <para><informaltable colsep="0" frame="none" rowsep="0">
+            <tgroup cols="2">
+              <colspec align="left" colwidth="125.55pt" />
+
+              <colspec colwidth="384.85pt" />
+
+              <tbody>
+                <row>
+                  <entry>ecl roxie attach</entry>
+
+                  <entry>Detach the roxie from Dali</entry>
+                </row>
+
+                <row>
+                  <entry><emphasis role="bold">Options</emphasis></entry>
+                </row>
+
+                <row>
+                  <entry>-v, --verbose</entry>
+
+                  <entry>Output additional tracing information</entry>
+                </row>
+
+                <row>
+                  <entry>-s, --server</entry>
+
+                  <entry>The IP Address of ESP server running eclwatch
+                  services</entry>
+                </row>
+
+                <row>
+                  <entry>--port</entry>
+
+                  <entry>The eclwatch services port (Default is 8010)</entry>
+                </row>
+
+                <row>
+                  <entry>-u, --username</entry>
+
+                  <entry>The username (if necessary)</entry>
+                </row>
+
+                <row>
+                  <entry>-pw, --password</entry>
+
+                  <entry>The password (if necessary)</entry>
+                </row>
+              </tbody>
+            </tgroup>
+          </informaltable></para>
+      </sect2>
+
+      <sect2 role="brk">
+        <title>ecl roxie reload</title>
+
+        <para><emphasis role="bold">ecl roxie reload
+        &lt;processName&gt;</emphasis></para>
+
+        <para>Examples:</para>
+
+        <programlisting>ecl roxie reload myroxie
+</programlisting>
+
+        <para></para>
+
+        <para><informaltable colsep="0" frame="none" rowsep="0">
+            <tgroup cols="2">
+              <colspec align="left" colwidth="125.55pt" />
+
+              <colspec colwidth="384.85pt" />
+
+              <tbody>
+                <row>
+                  <entry>ecl roxie reload</entry>
+
+                  <entry>Reloads the roxie info from Dali</entry>
+                </row>
+
+                <row>
+                  <entry><emphasis role="bold">Options</emphasis></entry>
+                </row>
+
+                <row>
+                  <entry>-v, --verbose</entry>
+
+                  <entry>Output additional tracing information</entry>
+                </row>
+
+                <row>
+                  <entry>-s, --server</entry>
+
+                  <entry>The IP Address of ESP server running eclwatch
+                  services</entry>
+                </row>
+
+                <row>
+                  <entry>--port</entry>
+
+                  <entry>The eclwatch services port (Default is 8010)</entry>
+                </row>
+
+                <row>
+                  <entry>-u, --username</entry>
+
+                  <entry>The username (if necessary)</entry>
+                </row>
+
+                <row>
+                  <entry>-pw, --password</entry>
+
+                  <entry>The password (if necessary)</entry>
+                </row>
+              </tbody>
+            </tgroup>
+          </informaltable></para>
+      </sect2>
+
+      <sect2 role="brk">
+        <title>ecl roxie check</title>
+
+        <para><emphasis role="bold">ecl roxie check
+        &lt;processName&gt;</emphasis></para>
+
+        <para>Examples:</para>
+
+        <programlisting>ecl roxie check myroxie
+</programlisting>
+
+        <para></para>
+
+        <para><informaltable colsep="0" frame="none" rowsep="0">
+            <tgroup cols="2">
+              <colspec align="left" colwidth="125.55pt" />
+
+              <colspec colwidth="384.85pt" />
+
+              <tbody>
+                <row>
+                  <entry>ecl roxie check</entry>
+
+                  <entry>Checks the roxie process state</entry>
+                </row>
+
+                <row>
+                  <entry><emphasis role="bold">Options</emphasis></entry>
                 </row>
 
                 <row>

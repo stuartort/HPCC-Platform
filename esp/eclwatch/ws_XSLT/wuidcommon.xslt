@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
     This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 -->
 
 <!DOCTYPE xsl:stylesheet [
@@ -47,7 +46,7 @@
                   &nbsp;
                   <a href="/esp/iframe?esp_iframe_title=ECL Workunit XML - {$wuid}&amp;inner=/WsWorkunits/WUFile%3fWuid%3d{$wuid}%26Type%3dXML" >XML</a>
                   &nbsp;
-                  <a href="/esp/iframe?esp_iframe_title=ECL Playground - {$wuid}&amp;inner=/esp/files/ECLPlayground.htm%3fWuid%3d{$wuid}" >ECL Playground</a>
+                  <a href="/esp/iframe?esp_iframe_title=ECL Playground - {$wuid}&amp;inner=/esp/files/ECLPlayground.htm%3fWuid%3d{$wuid}%26Target%3d{Cluster}" >ECL Playground</a>
                 </xsl:otherwise>
               </xsl:choose>
             </td>
@@ -400,7 +399,7 @@
                   Results: (<xsl:value-of select="ResultCount"/>)
                 </A>
                 &nbsp;-&nbsp;
-                <a href="/esp/iframe?esp_iframe_title=ECL Playground (Results) - {$wuid}&amp;inner=/esp/files/ECLPlaygroundResults.htm%3fWuid%3d{$wuid}" >Show</a>
+                <a href="/esp/iframe?esp_iframe_title=Results - {$wuid}&amp;inner=/esp/files/ECLPlaygroundResults.htm%3fWuid%3d{$wuid}" >Show</a>
               </div>
             </div>
             <div id="Results" class="wusectioncontent">
@@ -721,21 +720,41 @@
           </div>
         </xsl:if>
 
-        <xsl:if test="number(ClusterFlag)=1">
-        <table class="workunit">
-          <colgroup>
-            <col width="20%"/>
-            <col width="80%"/>
-          </colgroup>
-                 <tr>
-                    <td></td>
-                    <td>
-                      <input id="getthorslavelog" type="button" value="GetThorSlaveLog on >>" onclick="GetThorSlaveLog()" disabled="true"> </input>
-                      <input type="text" id="ThorSlaveIP" name="ThorSlaveIP" value="{$thorSlaveIP}" size="40" onkeyup="CheckIPInput();"/>
+        <xsl:if test="(number(ClusterFlag)=1) and (count(ThorLogList/ThorLogInfo) > 0)">
+            <table class="workunit">
+                <colgroup>
+                    <col width="20%"/>
+                    <col width="80%"/>
+                </colgroup>
+                <tr>
+                    <td colspan="3">
+                        <div style="border:1px solid grey;">
+                            <input id="getthorslavelog" type="button" value="Get slave log" onclick="GetThorSlaveLog()"> </input>
+                            <xsl:choose>
+                                <xsl:when test="number(ThorLogList/ThorLogInfo[1]/NumberSlaves) != 0">
+                                    Thor Process: <select id="ThorProcess" name="ThorProcess" onchange="thorProcessChanged(options[selectedIndex].value)">
+                                    <xsl:for-each select="ThorLogList/ThorLogInfo">
+                                        <xsl:variable name="val">
+                                            <xsl:value-of select="./NumberSlaves"/>@<xsl:value-of select="./LogDate"/>@<xsl:value-of select="./ProcessName"/>@<xsl:value-of select="./ClusterGroup"/>
+                                        </xsl:variable>
+                                        <option value="{$val}">
+                                            <xsl:value-of select="./ProcessName"/>
+                                        </option>
+                                    </xsl:for-each>
+                                    </select>
+                                    Slave Number<span id="NumberSlaves"></span>: <input type="text" id="SlaveNum" name="SlaveNum" value="1" size="4" onkeypress="return CheckSlaveNum(event);"/>
+                                </xsl:when>
+                                <xsl:otherwise>
+                                    <input type="hidden" id="ProcessName" value="{ThorLogList/ThorLogInfo[1]/ProcessName}"/>
+                                    <input type="hidden" id="LogDate" value="{ThorLogList/ThorLogInfo[1]/LogDate}"/>
+                                    on: <input type="text" id="SlaveAddress" name="SlaveAddress" title="Type in NetworkAddress or NetworkAddress_Port where the slave run" value="" size="16" onkeypress="return CheckSlaveAddress(event);"/>
+                                </xsl:otherwise>
+                            </xsl:choose>
+                        </div>
                     </td>
-                 </tr>
-        </table>
-          <br/>
+                </tr>
+            </table>
+            <br/>
         </xsl:if>
         <table class="workunit">
           <colgroup>
@@ -1046,8 +1065,6 @@
           </xsl:otherwise>
         </xsl:choose>
         <xsl:if test="number(IsSupplied)"> supplied</xsl:if>
-        &nbsp;-&nbsp;
-        <a href="javascript:void(0);" onclick="getLink(document.getElementById('ECL_Result_{position()}'), '/esp/files/ECLPlaygroundResults.htm?Wuid={$wuid}&amp;Sequence={Link}');return false;">Show</a>
       </td>
      <xsl:choose>
        <xsl:when test="number(ShowFileContent) and string-length(Link)">
@@ -1229,24 +1246,25 @@
       </xsl:if>
       <xsl:if test="starts-with(Type, 'ThorLog')">
         <td>
-          <a href="/WsWorkunits/WUFile/ThorLog?Wuid={$wuid}&amp;Type={Type}"
+          <a href="/WsWorkunits/WUFile/ThorLog?Wuid={$wuid}&amp;Process={Description}&amp;Type={Type}"
                         >
             thormaster.log: <xsl:value-of select="Name"/>
           </a>
         </td>
         <td>
-          <a href="javascript:void(0)" onclick="getOptions('thormaster.log', '/WsWorkunits/WUFile/ThorLog?Wuid={$wuid}&amp;Type={Type}', false); return false;">
+          <a href="javascript:void(0)" onclick="getOptions('thormaster.log', '/WsWorkunits/WUFile/ThorLog?Wuid={$wuid}&amp;Process={Description}&amp;Type={Type}', false); return false;">
             download
           </a>
         </td>
       </xsl:if>
       <xsl:if test="Type = 'EclAgentLog'">
         <td>
-          <a href="/WsWorkunits/WUFile/EclAgentLog?Wuid={$wuid}&amp;Type=EclAgentLog"
-                        >eclagent.log</a>
+          <a href="/WsWorkunits/WUFile/EclAgentLog?Wuid={$wuid}&amp;Process={Description}&amp;Type=EclAgentLog">
+              eclagent.log: <xsl:value-of select="Name"/>
+          </a>
         </td>
         <td>
-          <a href="javascript:void(0)" onclick="getOptions('eclagent.log', '/WsWorkunits/WUFile/EclAgentLog?Wuid={$wuid}&amp;Type=EclAgentLog', false); return false;">
+          <a href="javascript:void(0)" onclick="getOptions('eclagent.log', '/WsWorkunits/WUFile/EclAgentLog?Wuid={$wuid}&amp;Process={Description}&amp;Type=EclAgentLog', false); return false;">
             download
           </a>
         </td>
@@ -1316,7 +1334,7 @@
         </script>
       </head>
       <body class="yui-skin-sam" onload="onLoad()">
-        <h1>Exception(s) occured:</h1>
+        <h1>Exception(s) occurred:</h1>
         <table class="sort-table" id="resultsTable">
           <thead>
             <tr>

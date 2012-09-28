@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #include "jlib.hpp"
@@ -122,7 +121,7 @@ void ensureWsWorkunitAccess(IEspContext& context, const char* wuid, SecAccessFla
     Owned<IWorkUnitFactory> wf = getWorkUnitFactory(context.querySecManager(), context.queryUser());
     Owned<IConstWorkUnit> cw = wf->openWorkUnit(wuid, false);
     if (!cw)
-        throw MakeStringException(ECLWATCH_ECL_WU_ACCESS_DENIED, "Failed to open workunit %s", wuid);
+        throw MakeStringException(ECLWATCH_ECL_WU_ACCESS_DENIED, "Failed to open workunit %s when ensuring workunit access", wuid);
     ensureWsWorkunitAccess(context, *cw, minAccess);
 }
 
@@ -211,10 +210,10 @@ void getSashaNode(SocketEndpoint &ep)
 }
 
 
-bool WsWuInfo::getSourceFiles(IEspECLWorkunit &info, unsigned flags)
+void WsWuInfo::getSourceFiles(IEspECLWorkunit &info, unsigned flags)
 {
     if (!(flags & WUINFO_IncludeSourceFiles))
-        return true;
+        return;
     try
     {
         Owned<IUserDescriptor> userdesc;
@@ -312,15 +311,14 @@ bool WsWuInfo::getSourceFiles(IEspECLWorkunit &info, unsigned flags)
         }
 
         info.setSourceFiles(files);
-        return true;
     }
     catch(IException* e)
     {
         StringBuffer eMsg;
-        ERRLOG("%s", e->errorMessage(eMsg).str()); //log original exception
+        ERRLOG("%s", e->errorMessage(eMsg).str());
+        info.setSourceFilesDesc(eMsg.str());
         e->Release();
     }
-    return false;
 }
 
 void WsWuInfo::getExceptions(IEspECLWorkunit &info, unsigned flags)
@@ -339,10 +337,10 @@ void WsWuInfo::getExceptions(IEspECLWorkunit &info, unsigned flags)
     }
 }
 
-bool WsWuInfo::getVariables(IEspECLWorkunit &info, unsigned flags)
+void WsWuInfo::getVariables(IEspECLWorkunit &info, unsigned flags)
 {
     if (!(flags & WUINFO_IncludeVariables))
-        return true;
+        return;
     try
     {
         IArrayOf<IEspECLResult> results;
@@ -351,23 +349,25 @@ bool WsWuInfo::getVariables(IEspECLWorkunit &info, unsigned flags)
             getResult(vars->query(), results, flags);
         info.setVariables(results);
         results.kill();
-        return true;
     }
     catch(IException* e)
     {
         StringBuffer eMsg;
         ERRLOG("%s", e->errorMessage(eMsg).str());
+        info.setVariablesDesc(eMsg.str());
         e->Release();
     }
-    return false;
 }
 
-bool WsWuInfo::getTimers(IEspECLWorkunit &info, unsigned flags)
+void WsWuInfo::getTimers(IEspECLWorkunit &info, unsigned flags)
 {
     if (!(flags & WUINFO_IncludeTimers))
-        return true;
+        return;
     try
     {
+        StringBuffer totalThorTimeValue;
+        unsigned totalThorTimerCount; //Do we need this?
+
         IArrayOf<IEspECLTimer> timers;
         Owned<IStringIterator> it = &cw->getTimers();
         ForEach(*it)
@@ -382,6 +382,13 @@ bool WsWuInfo::getTimers(IEspECLWorkunit &info, unsigned flags)
             for (unsigned i = 0; i < name.length(); i++)
              if (name.s.charAt(i)=='_')
                  name.s.setCharAt(i, ' ');
+
+            if (strieq(name.str(), TOTALTHORTIME))
+            {
+                totalThorTimeValue = fd;
+                totalThorTimerCount = count;
+                continue;
+            }
 
             Owned<IEspECLTimer> t= createECLTimer("","");
             t->setName(name.str());
@@ -408,109 +415,134 @@ bool WsWuInfo::getTimers(IEspECLWorkunit &info, unsigned flags)
 
             timers.append(*t.getLink());
         }
+
+        if (totalThorTimeValue.length() > 0)
+        {
+            Owned<IEspECLTimer> t= createECLTimer("","");
+            t->setName(TOTALTHORTIME);
+            t->setValue(totalThorTimeValue.str());
+            t->setCount(totalThorTimerCount);
+            timers.append(*t.getLink());
+        }
+
         info.setTimers(timers);
-        return true;
     }
     catch(IException* e)
     {
         StringBuffer eMsg;
-        e->errorMessage(eMsg);
-        ERRLOG("%s", eMsg.str()); //log original exception
+        ERRLOG("%s", e->errorMessage(eMsg).str());
+        info.setTimersDesc(eMsg.str());
         e->Release();
     }
-    return false;
 }
 
-const unsigned MAXTHORS = 1024;
-
-bool WsWuInfo::getHelpers(IEspECLWorkunit &info, unsigned flags)
+void WsWuInfo::getHelpers(IEspECLWorkunit &info, unsigned flags)
 {
     try
     {
         Owned <IConstWUQuery> query = cw->getQuery();
-        if(query)
+        if(!query)
         {
-            SCMStringBuffer qname;
-            query->getQueryShortText(qname);
-            if(qname.length())
-            {
-                if((flags & WUINFO_TruncateEclTo64k) && (qname.length() > 64000))
-                    qname.setLen(qname.str(), 64000);
+            ERRLOG("Cannot get Query for this workunit.");
+            info.setHelpersDesc("Cannot get Query for this workunit.");
+        }
 
+        SCMStringBuffer qname;
+        query->getQueryShortText(qname);
+        if(qname.length())
+        {
+            if((flags & WUINFO_TruncateEclTo64k) && (qname.length() > 64000))
+                qname.setLen(qname.str(), 64000);
+
+            IEspECLQuery* q=&info.updateQuery();
+            q->setText(qname.str());
+        }
+
+        if (version > 1.34)
+        {
+            SCMStringBuffer mainDefinition;
+            query->getQueryMainDefinition(mainDefinition);
+            if(mainDefinition.length())
+            {
                 IEspECLQuery* q=&info.updateQuery();
-                q->setText(qname.str());
+                q->setQueryMainDefinition(mainDefinition.str());
             }
+        }
 
-            if (version > 1.34)
+        if (version > 1.30)
+        {
+            SCMStringBuffer qText;
+            query->getQueryText(qText);
+            if ((qText.length() > 0) && isArchiveQuery(qText.str()))
+                info.setHasArchiveQuery(true);
+        }
+
+        IArrayOf<IEspECLHelpFile> helpers;
+        getHelpFiles(query, FileTypeCpp, helpers);
+        getHelpFiles(query, FileTypeDll, helpers);
+        getHelpFiles(query, FileTypeResText, helpers);
+
+        getWorkunitThorLogInfo(helpers, info);
+
+        if (cw->getWuidVersion() > 0)
+        {
+            Owned<IStringIterator> eclAgentInstances = cw->getProcesses("EclAgent");
+            ForEach (*eclAgentInstances)
             {
-                SCMStringBuffer mainDefinition;
-                query->getQueryMainDefinition(mainDefinition);
-                if(mainDefinition.length())
+                SCMStringBuffer processName;
+                eclAgentInstances->str(processName);
+                if (processName.length() < 1)
+                    continue;
+
+                Owned<IStringIterator> eclAgentLogs = cw->getLogs("EclAgent", processName.str());
+                ForEach (*eclAgentLogs)
                 {
-                    IEspECLQuery* q=&info.updateQuery();
-                    q->setQueryMainDefinition(mainDefinition.str());
+                    SCMStringBuffer logName;
+                    eclAgentLogs->str(logName);
+                    if (logName.length() < 1)
+                        continue;
+
+                    Owned<IEspECLHelpFile> h= createECLHelpFile("","");
+                    h->setName(logName.str());
+                    h->setDescription(processName.str());
+                    h->setType(File_EclAgentLog);
+                    helpers.append(*h.getLink());
                 }
             }
-
-            if (version > 1.30)
-            {
-                SCMStringBuffer qText;
-                query->getQueryText(qText);
-                if ((qText.length() > 0) && isArchiveQuery(qText.str()))
-                    info.setHasArchiveQuery(true);
-            }
-
-            IArrayOf<IEspECLHelpFile> helpers;
-            getHelpFiles(query, FileTypeCpp, helpers);
-            getHelpFiles(query, FileTypeDll, helpers);
-            getHelpFiles(query, FileTypeResText, helpers);
-
-            SCMStringBuffer name;
-            for (int i0 = 1; i0 < MAXTHORS; i0++)
-            {
-                StringBuffer fileType;
-                if (i0 < 2)
-                    fileType.append(File_ThorLog);
-                else
-                    fileType.appendf("%s%d", File_ThorLog, i0);
-                cw->getDebugValue(fileType.str(), name);
-                if(name.length() < 1)
-                    break;
-
-                Owned<IEspECLHelpFile> h= createECLHelpFile("","");
-                h->setName(name.str());
-                h->setType(fileType.str());
-                helpers.append(*h.getLink());
-                name.clear();
-            }
-
-            cw->getDebugValue("EclAgentLog", name);
-            if(name.length())
-            {
-                Owned<IEspECLHelpFile> h= createECLHelpFile("","");
-                h->setName(name.str());
-                h->setType("EclAgentLog");
-                helpers.append(*h.getLink());
-                name.clear();
-            }
-         info.setHelpers(helpers);
-         return true;
         }
+        else // legacy wuid
+        {
+            Owned<IStringIterator> eclAgentLogs = cw->getLogs("EclAgent");
+            ForEach (*eclAgentLogs)
+            {
+                SCMStringBuffer name;
+                eclAgentLogs->str(name);
+                if (name.length() < 1)
+                    continue;
+
+                Owned<IEspECLHelpFile> h= createECLHelpFile("","");
+                h->setName(name.str());
+                h->setType(File_EclAgentLog);
+                helpers.append(*h.getLink());
+                break;
+            }
+        }
+
+        info.setHelpers(helpers);
     }
-     catch(IException* e)
-     {
-         StringBuffer eMsg;
-         e->errorMessage(eMsg);
-         ERRLOG("%s", eMsg.str()); //log original exception
-         e->Release();
-     }
-     return false;
+    catch(IException* e)
+    {
+        StringBuffer eMsg;
+        ERRLOG("%s", e->errorMessage(eMsg).str());
+        info.setHelpersDesc(eMsg.str());
+        e->Release();
+    }
 }
 
-bool WsWuInfo::getApplicationValues(IEspECLWorkunit &info, unsigned flags)
+void WsWuInfo::getApplicationValues(IEspECLWorkunit &info, unsigned flags)
 {
     if (!(flags & WUINFO_IncludeApplicationValues))
-        return true;
+        return;
     try
     {
         IArrayOf<IEspApplicationValue> av;
@@ -530,22 +562,20 @@ bool WsWuInfo::getApplicationValues(IEspECLWorkunit &info, unsigned flags)
         }
 
         info.setApplicationValues(av);
-        return true;
     }
     catch(IException* e)
     {
         StringBuffer eMsg;
-        e->errorMessage(eMsg);
-        ERRLOG("%s", eMsg.str()); //log original exception
+        ERRLOG("%s", e->errorMessage(eMsg).str());
+        info.setApplicationValuesDesc(eMsg.str());
         e->Release();
     }
-    return false;
 }
 
-bool WsWuInfo::getDebugValues(IEspECLWorkunit &info, unsigned flags)
+void WsWuInfo::getDebugValues(IEspECLWorkunit &info, unsigned flags)
 {
     if (!(flags & WUINFO_IncludeDebugValues))
-        return true;
+        return;
     try
     {
         IArrayOf<IEspDebugValue> dv;
@@ -562,16 +592,14 @@ bool WsWuInfo::getDebugValues(IEspECLWorkunit &info, unsigned flags)
             dv.append(*t.getLink());
         }
         info.setDebugValues(dv);
-        return true;
     }
     catch(IException* e)
     {
         StringBuffer eMsg;
-        e->errorMessage(eMsg);
-        ERRLOG("%s", eMsg.str()); //log original exception
+        ERRLOG("%s", e->errorMessage(eMsg).str());
+        info.setDebugValuesDesc(eMsg.str());
         e->Release();
     }
-    return false;
 }
 
 const char *getGraphNum(const char *s,unsigned &num)
@@ -587,7 +615,7 @@ const char *getGraphNum(const char *s,unsigned &num)
     return s;
 }
 
-bool WsWuInfo::getGraphInfo(IEspECLWorkunit &info, unsigned flags)
+void WsWuInfo::getGraphInfo(IEspECLWorkunit &info, unsigned flags)
 {
      if (version > 1.01)
      {
@@ -597,12 +625,18 @@ bool WsWuInfo::getGraphInfo(IEspECLWorkunit &info, unsigned flags)
         Owned<IRemoteConnection> conn = querySDS().connect(xpath.str(), myProcessSession(), 0, 5*60*1000);
         if (!conn)
         {
-            DBGLOG("Could not connect to SDS");
-            return false;
+            DBGLOG("Cannot connect to SDS");
+            info.setGraphsDesc("Cannot connect to SDS");
+            return;
         }
         IPropertyTree *wpt = conn->queryRoot();
         if (!wpt)
-            return false;
+        {
+            DBGLOG("Cannot get data from SDS");
+            info.setGraphsDesc("Cannot get data from SDS");
+            return;
+        }
+
         Owned<IPropertyTreeIterator> iter = wpt->getElements("Timings/Timing");
         StringBuffer name;
         IArrayOf<IConstECLTimingData> timingdatarray;
@@ -627,7 +661,8 @@ bool WsWuInfo::getGraphInfo(IEspECLWorkunit &info, unsigned flags)
      }
 
     if (!(flags & WUINFO_IncludeGraphs))
-        return true;
+        return;
+
     try
     {
         SCMStringBuffer runningGraph;
@@ -674,16 +709,14 @@ bool WsWuInfo::getGraphInfo(IEspECLWorkunit &info, unsigned flags)
             graphs.append(*g.getLink());
         }
         info.setGraphs(graphs);
-        return true;
     }
     catch(IException* e)
     {
         StringBuffer eMsg;
-        e->errorMessage(eMsg);
-        ERRLOG("%s", eMsg.str()); //log original exception
+        ERRLOG("%s", e->errorMessage(eMsg).str());
+        info.setGraphsDesc(eMsg.str());
         e->Release();
     }
-    return false;
 }
 
 void WsWuInfo::getGraphTimingData(IArrayOf<IConstECLTimingData> &timingData, unsigned flags)
@@ -811,7 +844,7 @@ void WsWuInfo::getCommon(IEspECLWorkunit &info, unsigned flags)
     if (version > 1.27)
     {
         StringBuffer totalThorTimeStr;
-        unsigned totalThorTimeMS = cw->getTimerDuration("Total thor time", NULL);
+        unsigned totalThorTimeMS = cw->getTimerDuration(TOTALTHORTIME, NULL);
         formatDuration(totalThorTimeStr, totalThorTimeMS);
         info.setTotalThorTime(totalThorTimeStr.str());
     }
@@ -853,26 +886,172 @@ void WsWuInfo::getInfo(IEspECLWorkunit &info, unsigned flags)
 
     getClusterInfo(info, flags);
     getExceptions(info, flags);
+    getHelpers(info, flags);
+    getGraphInfo(info, flags);
+    getSourceFiles(info, flags);
+    getResults(info, flags);
+    getVariables(info, flags);
+    getTimers(info, flags);
+    getDebugValues(info, flags);
+    getApplicationValues(info, flags);
+    getWorkflow(info, flags);
+}
 
-    const char* msg = "This section cannot be dispayed due to an exception.";
-    if (!getHelpers(info, flags))
-        info.setHelpersDesc(msg);
-    if (!getGraphInfo(info, flags))
-        info.setGraphsDesc(msg);
-    if (!getSourceFiles(info, flags))
-        info.setSourceFilesDesc(msg);
-    if (!getResults(info, flags))
-        info.setResultsDesc(msg);
-    if (!getVariables(info, flags))
-        info.setVariablesDesc(msg);
-    if (!getTimers(info, flags))
-        info.setTimersDesc(msg);
-    if (!getDebugValues(info, flags))
-        info.setDebugValuesDesc(msg);
-    if (!getApplicationValues(info, flags))
-        info.setApplicationValuesDesc(msg);
-    if (!getWorkflow(info, flags))
-        info.setWorkflowsDesc(msg);
+unsigned WsWuInfo::getWorkunitThorLogInfo(IArrayOf<IEspECLHelpFile>& helpers, IEspECLWorkunit &info)
+{
+    unsigned countThorLog = 0;
+
+    IArrayOf<IConstThorLogInfo> thorLogList;
+    if (cw->getWuidVersion() > 0)
+    {
+        SCMStringBuffer clusterName;
+        Owned<IConstWUClusterInfo> clusterInfo = getTargetClusterInfo(cw->getClusterName(clusterName).str());
+        if (!clusterInfo)
+        {
+            SCMStringBuffer wuid;
+            WARNLOG("Cannot find TargetClusterInfo for workunit %s", cw->getWuid(wuid).str());
+            return countThorLog;
+        }
+
+        unsigned numberOfSlaves = clusterInfo->getSize();
+
+        Owned<IStringIterator> thorInstances = cw->getProcesses("Thor");
+        ForEach (*thorInstances)
+        {
+            SCMStringBuffer processName;
+            thorInstances->str(processName);
+            if (processName.length() < 1)
+                continue;
+
+            StringBuffer groupName;
+            getClusterThorGroupName(groupName, processName.str());
+
+            Owned<IStringIterator> thorLogs = cw->getLogs("Thor", processName.str());
+            ForEach (*thorLogs)
+            {
+                SCMStringBuffer logName;
+                thorLogs->str(logName);
+                if (logName.length() < 1)
+                    continue;
+
+                countThorLog++;
+
+                StringBuffer fileType;
+                if (countThorLog < 2)
+                    fileType.append(File_ThorLog);
+                else
+                    fileType.appendf("%s%d", File_ThorLog, countThorLog);
+
+                Owned<IEspECLHelpFile> h= createECLHelpFile("","");
+                h->setName(logName.str());
+                h->setDescription(processName.str());
+                h->setType(fileType.str());
+                helpers.append(*h.getLink());
+
+                if (version < 1.38)
+                    continue;
+
+                const char* pStr = logName.str();
+                const char* ppStr = strstr(pStr, "/thormaster.");
+                if (!ppStr)
+                {
+                    WARNLOG("Invalid thorlog entry in workunit xml: %s", logName.str());
+                    continue;
+                }
+
+                ppStr += 12;
+                StringBuffer logDate = ppStr;
+                logDate.setLength(10);
+
+                Owned<IEspThorLogInfo> thorLog = createThorLogInfo("","");
+                thorLog->setProcessName(processName.str());
+                thorLog->setClusterGroup(groupName.str());
+                thorLog->setLogDate(logDate.str());
+                thorLog->setNumberSlaves(numberOfSlaves);
+                thorLogList.append(*thorLog.getLink());
+            }
+        }
+    }
+    else //legacy wuid
+    {
+        Owned<IStringIterator> thorLogs = cw->getLogs("Thor");
+        ForEach (*thorLogs)
+        {
+            SCMStringBuffer name;
+            thorLogs->str(name);
+            if (name.length() < 1)
+                continue;
+
+            countThorLog++;
+
+            StringBuffer fileType;
+            if (countThorLog < 2)
+                fileType.append(File_ThorLog);
+            else
+                fileType.appendf("%s%d", File_ThorLog, countThorLog);
+
+            Owned<IEspECLHelpFile> h= createECLHelpFile("","");
+            h->setName(name.str());
+            h->setType(fileType.str());
+            helpers.append(*h.getLink());
+        }
+
+        StringBuffer logDir;
+        Owned<IEnvironmentFactory> envFactory = getEnvironmentFactory();
+        Owned<IConstEnvironment> constEnv = envFactory->openEnvironmentByFile();
+        constEnv->getPTree().getProp("EnvSettings/log", logDir);
+        if (logDir.length() > 0)
+        {
+            Owned<IStringIterator> debugs = cw->getLogs("Thor");
+            ForEach(*debugs)
+            {
+                SCMStringBuffer val;
+                debugs->str(val);
+                if (val.length() < 1)
+                    continue;
+
+                const char* pStr = val.str();
+                const char* ppStr = strstr(pStr, logDir.str());
+                if (!ppStr)
+                {
+                    WARNLOG("Invalid thorlog entry in workunit xml: %s", val.str());
+                    continue;
+                }
+
+                const char* pProcessName = ppStr + logDir.length();
+                char sep = pProcessName[0];
+                StringBuffer processName = pProcessName + 1;
+                ppStr = strchr(pProcessName + 1, sep);
+                if (!ppStr)
+                {
+                    WARNLOG("Invalid thorlog entry in workunit xml: %s", val.str());
+                    continue;
+                }
+                processName.setLength(ppStr - pProcessName - 1);
+
+                StringBuffer groupName;
+                getClusterThorGroupName(groupName, processName.str());
+
+                StringBuffer logDate = ppStr + 12;
+                logDate.setLength(10);
+
+                Owned<IEspThorLogInfo> thorLog = createThorLogInfo("","");
+                thorLog->setProcessName(processName.str());
+                thorLog->setClusterGroup(groupName.str());
+                thorLog->setLogDate(logDate.str());
+                //for legacy wuid, the log name does not contain slaveNum. So, a user may not specify
+                //a slaveNum and we only display the first slave log if > 1 per IP.
+                thorLog->setNumberSlaves(0);
+                thorLogList.append(*thorLog.getLink());
+            }
+        }
+    }
+
+    if (thorLogList.length() > 0)
+        info.setThorLogList(thorLogList);
+    thorLogList.kill();
+
+    return countThorLog;
 }
 
 bool WsWuInfo::getClusterInfo(IEspECLWorkunit &info, unsigned flags)
@@ -931,10 +1110,8 @@ bool WsWuInfo::getClusterInfo(IEspECLWorkunit &info, unsigned flags)
     return true;
 }
 
-bool WsWuInfo::getWorkflow(IEspECLWorkunit &info, unsigned flags)
+void WsWuInfo::getWorkflow(IEspECLWorkunit &info, unsigned flags)
 {
-    bool success=true;
-
     bool eventCountRemaining = false;
     bool eventCountUnlimited = false;
     try
@@ -987,9 +1164,9 @@ bool WsWuInfo::getWorkflow(IEspECLWorkunit &info, unsigned flags)
     }
     catch(IException* e)
     {
-        success = false;
         StringBuffer eMsg;
         ERRLOG("%s", e->errorMessage(eMsg).str());
+        info.setWorkflowsDesc(eMsg.str());
         e->Release();
     }
 
@@ -997,7 +1174,6 @@ bool WsWuInfo::getWorkflow(IEspECLWorkunit &info, unsigned flags)
         info.setEventSchedule(2); //Can deschedule
     else if (eventCountUnlimited || eventCountRemaining)
         info.setEventSchedule(1); //Can reschedule
-    return success;
 }
 
 bool shouldFileContentBeShown(IEspContext &context, const char * logicalName)
@@ -1231,7 +1407,7 @@ void WsWuInfo::getResult(IConstWUResult &r, IArrayOf<IEspECLResult>& results, un
 }
 
 
-bool WsWuInfo::getResults(IEspECLWorkunit &info, unsigned flags)
+void WsWuInfo::getResults(IEspECLWorkunit &info, unsigned flags)
 {
     try
     {
@@ -1256,15 +1432,14 @@ bool WsWuInfo::getResults(IEspECLWorkunit &info, unsigned flags)
             info.setResults(results);
 
         results.kill();
-        return true;
     }
     catch(IException* e)
     {
         StringBuffer eMsg;
         ERRLOG("%s", e->errorMessage(eMsg).str());
+        info.setResultsDesc(eMsg.str());
         e->Release();
     }
-    return false;
 }
 
 void WsWuInfo::getHelpFiles(IConstWUQuery* query, WUFileType type, IArrayOf<IEspECLHelpFile>& helpers)
@@ -1429,10 +1604,16 @@ void appendIOStreamContent(MemoryBuffer &mb, IFileIOStream *ios, bool forDownloa
     }
 }
 
-void WsWuInfo::getWorkunitEclAgentLog(MemoryBuffer& buf)
+void WsWuInfo::getWorkunitEclAgentLog(const char* eclAgentInstance, MemoryBuffer& buf)
 {
     SCMStringBuffer logname;
-    cw->getDebugValue("EclAgentLog", logname);
+    Owned<IStringIterator> eclAgentLogs = cw->getLogs("EclAgent", eclAgentInstance);
+    ForEach (*eclAgentLogs)
+    {
+        eclAgentLogs->str(logname);
+        if (logname.length() > 0)
+            break;
+    }
 
     unsigned pid = cw->getAgentPID();
     if(logname.length() == 0)
@@ -1490,10 +1671,16 @@ void WsWuInfo::getWorkunitEclAgentLog(MemoryBuffer& buf)
     }
 }
 
-void WsWuInfo::getWorkunitThorLog(MemoryBuffer& buf)
+void WsWuInfo::getWorkunitThorLog(const char* processName, MemoryBuffer& buf)
 {
     SCMStringBuffer logname;
-    cw->getDebugValue(File_ThorLog, logname);
+    Owned<IStringIterator> thorLogs = cw->getLogs("Thor", processName);
+    ForEach (*thorLogs)
+    {
+        thorLogs->str(logname);
+        if (logname.length() > 0)
+            break;
+    }
 
     Owned<IFile> rFile = createIFile(logname.str());
     if (!rFile)
@@ -1538,26 +1725,59 @@ void WsWuInfo::getWorkunitThorLog(MemoryBuffer& buf)
     }
 }
 
-void WsWuInfo::getWorkunitThorSlaveLog(const char *slaveip, MemoryBuffer& buf, bool forDownload)
+void WsWuInfo::getWorkunitThorSlaveLog(const char *groupName, const char *ipAddress, const char* logDate, const char* logDir, int slaveNum, MemoryBuffer& buf, bool forDownload)
 {
-   if (isEmpty(slaveip))
-      throw MakeStringException(ECLWATCH_INVALID_INPUT,"ThorSlave IP not specified.");
+    if (isEmpty(logDir))
+      throw MakeStringException(ECLWATCH_INVALID_INPUT,"ThorSlave log path not specified.");
+    if (isEmpty(logDate))
+        throw MakeStringException(ECLWATCH_INVALID_INPUT,"ThorSlave log date not specified.");
 
-    SCMStringBuffer logname;
-    cw->getDebugValue(File_ThorLog, logname);
+    StringBuffer slaveIPAddress, logName;
+    if (slaveNum > 0)
+    {
+        if (isEmpty(groupName))
+          throw MakeStringException(ECLWATCH_INVALID_INPUT,"Thor group not specified.");
 
-    StringBuffer logdir;
-    splitDirTail(logname.str(),logdir);
+        Owned<IGroup> nodeGroup = queryNamedGroupStore().lookup(groupName);
+        if (!nodeGroup || (nodeGroup->ordinality() == 0))
+        {
+            WARNLOG("Node group %s not found", groupName);
+            return;
+        }
+
+        nodeGroup->queryNode(slaveNum-1).endpoint().getIpText(slaveIPAddress);
+        if (slaveIPAddress.length() < 1)
+            throw MakeStringException(ECLWATCH_INVALID_INPUT,"ThorSlave log network address not found.");
+
+        logName.appendf("thorslave.%d.%s.log", slaveNum, logDate);
+    }
+    else
+    {//legacy wuid: a user types in an IP address for a thor slave
+        if (isEmpty(ipAddress))
+            throw MakeStringException(ECLWATCH_INVALID_INPUT,"ThorSlave address not specified.");
+
+        //thorslave.10.239.219.6_20100.2012_05_23.log
+        logName.appendf("thorslave.%s*.%s.log", ipAddress, logDate);
+        const char* portPtr = strchr(ipAddress, '_');
+        if (!portPtr)
+            slaveIPAddress.append(ipAddress);
+        else
+        {
+            StringBuffer ipAddressStr = ipAddress;
+            ipAddressStr.setLength(portPtr - ipAddress);
+            slaveIPAddress.append(ipAddressStr.str());
+        }
+    }
 
     RemoteFilename rfn;
-    rfn.setRemotePath(logdir.str());
-    SocketEndpoint ep(slaveip);
+    rfn.setRemotePath(logDir);
+    SocketEndpoint ep(slaveIPAddress.str());
     rfn.setIp(ep);
 
     Owned<IFile> dir = createIFile(rfn);
-    Owned<IDirectoryIterator> diriter = dir->directoryFiles("*.log");
+    Owned<IDirectoryIterator> diriter = dir->directoryFiles(logName.str());
     if (!diriter->first())
-      throw MakeStringException(ECLWATCH_FILE_NOT_EXIST,"Cannot find Thor slave log file %s.", logdir.str());
+      throw MakeStringException(ECLWATCH_FILE_NOT_EXIST,"Cannot find Thor slave log file %s.", logName.str());
 
     Linked<IFile> logfile = &diriter->query();
     diriter.clear();
@@ -1566,10 +1786,49 @@ void WsWuInfo::getWorkunitThorSlaveLog(const char *slaveip, MemoryBuffer& buf, b
 
     OwnedIFileIO rIO = logfile->openShared(IFOread,IFSHfull);
     if (!rIO)
-        throw MakeStringException(ECLWATCH_CANNOT_READ_FILE,"Cannot read file %s.",logdir.str());
+        throw MakeStringException(ECLWATCH_CANNOT_READ_FILE,"Cannot read file %s.",logName.str());
 
     OwnedIFileIOStream ios = createBufferedIOStream(rIO);
-    appendIOStreamContent(buf, ios.get(), forDownload);
+    if (slaveNum > 0)
+    {
+        StringBuffer line;
+        bool eof = false;
+        bool include = false;
+
+        VStringBuffer startwuid("Started wuid=%s", wuid.str());
+        VStringBuffer endwuid("Finished wuid=%s", wuid.str());
+
+        const char *sw = startwuid.str();
+        const char *ew = endwuid.str();
+
+        while (!eof)
+        {
+            line.clear();
+            loop
+            {
+                char c;
+                size32_t numRead = ios->read(1, &c);
+                if (!numRead)
+                {
+                    eof = true;
+                    break;
+                }
+                line.append(c);
+                if (c=='\n')
+                    break;
+            }
+            if (strstr(line.str(), sw))
+                include = true;
+            if (include)
+                buf.append(line.length(), line.str());
+            if (strstr(line.str(), ew))
+                include = false;
+        }
+    }
+    else
+    {//legacy wuid
+        appendIOStreamContent(buf, ios.get(), forDownload);
+    }
 }
 
 void WsWuInfo::getWorkunitResTxt(MemoryBuffer& buf)

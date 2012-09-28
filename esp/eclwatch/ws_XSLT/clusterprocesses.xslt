@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
     This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 -->
 
 <!DOCTYPE xsl:stylesheet [
@@ -65,6 +64,7 @@
 
    <xsl:variable name="autoRefresh" select="$reqInfo/AutoRefresh"/>
    <xsl:variable name="numColumns" select="count(/GetTargetClusterInfoResponse/Columns/Item)"/>
+   <xsl:variable name="countTargetClusters" select="count(/GetTargetClusterInfoResponse/TargetClusterInfoList/TargetClusterInfo)"/>
 
     <xsl:template match="/GetTargetClusterInfoResponse">
       <html>
@@ -89,6 +89,7 @@
               </script>
 
               <script language="JavaScript1.2">
+                var countTCs=<xsl:value-of select="$countTargetClusters"/>;
                 <xsl:text disable-output-escaping="yes"><![CDATA[
                   var allowReloadPage = true;
                   var sortableTable = null;
@@ -97,6 +98,7 @@
 
                   function onLoad()
                   {
+                    document.getElementsByName('TargetClusters.itemcount')[0].value = countTCs;
                     initSelection('resultsTable');
                     initPreflightControls();
 
@@ -112,9 +114,10 @@
                     var inputs = document.getElementById("listitems").getElementsByTagName("input");
                     for(var i=0, len=inputs.length; i<len; i++)
                     {
-                      if(inputs[i].name.match(/^TargetClusters_i\d+$/))
+                      if(inputs[i].name.match(/^TargetClusters.\d+$/))
                       {
-                          clusterChecked++;
+                          if (inputs[i].checked)
+                              clusterChecked++;
                       }
                     }
                     document.forms[0].submitBtn.disabled = clusterChecked == 0;
@@ -254,6 +257,7 @@
           <form id="listitems" action="/ws_machine/GetTargetClusterInfo" method="post">
             <input type="hidden" name="Path" value="{$reqInfo/Path}"/>
             <input type="hidden" name="Cluster" value="{$clusterName}"/>
+            <input type="hidden" name="TargetClusters.itemcount" value=""/>
                <xsl:choose>
                   <xsl:when test="Exceptions">
                      <h1><xsl:value-of select="Exceptions"/></h1>
@@ -302,6 +306,7 @@
                                    <xsl:with-param name="getProcessorInfo" select="boolean(RequestInfo/GetProcessorInfo=1)"/>
                                    <xsl:with-param name="getSoftwareInfo" select="boolean(RequestInfo/GetSoftwareInfo=1)"/>
                                    <xsl:with-param name="getStorageInfo" select="boolean(RequestInfo/GetStorageInfo=1)"/>
+                                   <xsl:with-param name="localFileSystemsOnly" select="boolean(RequestInfo/LocalFileSystemsOnly=1)"/>
                                    <xsl:with-param name="applyProcessFilter" select="boolean(RequestInfo/ApplyProcessFilter=1)"/>
                                    <xsl:with-param name="addProcessesToFilter" select="RequestInfo/AddProcessesToFilter"/>
                                    <xsl:with-param name="securityString" select="RequestInfo/SecurityString"/>
@@ -328,7 +333,7 @@
     <table id="resultsTable" class="sort-table" width="100%">
       <tr class="grey">
         <td valign="top" width="20">
-          <input type="checkbox" name="TargetClusters_i{count(preceding::TargetClusterInfo)}" checked="1"
+          <input type="checkbox" name="TargetClusters.{count(preceding::TargetClusterInfo)}" checked="1"
                                 value="{$type}:{$name}" title="Select this target cluster" onclick="return clickTCCheckbox('{$type}', '{$name}', this);"></input>
         </td>
         <td align="left" width="20">

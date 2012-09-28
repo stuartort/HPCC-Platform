@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 -->
 
 <!DOCTYPE xsl:stylesheet [
@@ -65,6 +64,7 @@
    <xsl:variable name="autoRefresh" select="$reqInfo/AutoRefresh"/>
    <xsl:variable name="numColumns" select="count(/GetMachineInfoResponse/Columns/Item)"/>
    <xsl:variable name="SwapNode" select="$reqInfo/OldIP/text() and $clusterType='THORSPARENODES'"/>
+   <xsl:variable name="numSlaveNodes" select="count(/GetMachineInfoResponse/Machines/MachineInfoEx/ProcessType[text()='ThorSlaveProcess'])"/>
    
   <xsl:template match="/GetMachineInfoResponse">
     <html>
@@ -158,12 +158,16 @@
                        case 'Processes': 
                        case 'Processes Down':
                        case 'Condition':
+                       case 'Component':
                        case 'State':
                           sort = 'String'; 
                           break;
                        case 'Up Time':
                        case 'Computer Up Time': 
                           sort = 'TimePeriod'; 
+                          break;
+                       case 'Slave Number':
+                          sort = 'Number';
                           break;
                        default:
                           sort = "Percentage";
@@ -213,6 +217,7 @@
              </xsl:if>
              <input type="hidden" name="Path" value="{$reqInfo/Path}"/>
              <input type="hidden" name="Cluster" value="{$clusterName}"/>
+             <input type="hidden" name="Addresses.itemcount" value="{count(Machines/MachineInfoEx)}"/>
                <xsl:choose>
                   <xsl:when test="Exceptions">
                      <h1><xsl:value-of select="Exceptions"/></h1>
@@ -264,6 +269,7 @@
                                            <xsl:with-param name="getProcessorInfo" select="boolean(RequestInfo/GetProcessorInfo=1)"/>
                                            <xsl:with-param name="getSoftwareInfo" select="boolean(RequestInfo/GetSoftwareInfo=1)"/>
                                            <xsl:with-param name="getStorageInfo" select="boolean(RequestInfo/GetStorageInfo=1)"/>
+                                           <xsl:with-param name="localFileSystemsOnly" select="boolean(RequestInfo/LocalFileSystemsOnly=1)"/>
                                            <xsl:with-param name="applyProcessFilter" select="boolean(RequestInfo/ApplyProcessFilter=1)"/>
                                            <xsl:with-param name="addProcessesToFilter" select="RequestInfo/AddProcessesToFilter"/>
                                           <xsl:with-param name="enableSNMP" select="number(RequestInfo/EnableSNMP)"/>
@@ -300,6 +306,9 @@
                </th>
                <th>Location</th>
                <th>Component</th>
+               <xsl:if test="$numSlaveNodes > 0">
+                  <th>Slave Number</th>
+               </xsl:if>
                <xsl:choose>
                   <xsl:when test="../Columns/Item">
                      <xsl:for-each select="../Columns/Item[text()='Condition']">
@@ -383,10 +392,10 @@
             </xsl:if-->
            <xsl:choose>
             <xsl:when test="string(ComponentName)='AgentExec'">
-               <input type="checkbox" name="Addresses_i{position()}" value="{Address}|{ConfigAddress}:EclAgentProcess:eclagent:{OS}:{translate(ComponentPath, ':', '$')}" onclick="return clicked(this, event)" checked="true"/>
+               <input type="checkbox" name="Addresses.{position()-1}" value="{Address}|{ConfigAddress}:EclAgentProcess:eclagent:{OS}:{translate(ComponentPath, ':', '$')}" onclick="return clicked(this, event)" checked="true"/>
             </xsl:when>
             <xsl:otherwise>
-              <input type="checkbox" name="Addresses_i{position()}" value="{Address}|{ConfigAddress}:{ProcessType}:{ComponentName}:{OS}:{translate(ComponentPath, ':', '$')}:{ProcessNumber}" onclick="return clicked(this, event)" checked="true"/>
+              <input type="checkbox" name="Addresses.{position()-1}" value="{Address}|{ConfigAddress}:{ProcessType}:{ComponentName}:{OS}:{translate(ComponentPath, ':', '$')}:{ProcessNumber}" onclick="return clicked(this, event)" checked="true"/>
             </xsl:otherwise>
            </xsl:choose>
          </td>
@@ -405,16 +414,18 @@
             <xsl:value-of select="DisplayType"/>
             <xsl:if test="string(ComponentName)!=''">
                <br/>
-               <xsl:choose>
-                  <xsl:when test="ProcessType='ThorSlaveProcess'">
-                     <xsl:value-of select="concat('[', ProcessNumber, ']')"/>
-                  </xsl:when>
-                  <xsl:when test="ProcessType!='ThorMasterProcess' and ProcessType!='RoxieServerProcess'">
-                     <xsl:value-of select="concat('[', ComponentName, ']')"/>
-                  </xsl:when>
-               </xsl:choose>
+                <xsl:if test="ProcessType!='ThorMasterProcess' and ProcessType!='RoxieServerProcess'">
+                    <xsl:value-of select="concat('[', ComponentName, ']')"/>
+                </xsl:if>
             </xsl:if>
          </td>
+         <xsl:if test="$numSlaveNodes > 0">
+             <td>
+                <xsl:if test="ProcessType='ThorSlaveProcess'">
+                    <xsl:value-of select="ProcessNumber"/>
+                </xsl:if>
+             </td>
+         </xsl:if>
          <xsl:choose>
             <xsl:when test="UpTime/text()">
                   <xsl:variable name="cond" select="ComponentInfo/Condition"/>

@@ -32,7 +32,7 @@
       <para></para>
     </legalnotice>
 
-   <xi:include href="common/Version.xml" xpointer="FooterInfo"
+    <xi:include href="common/Version.xml" xpointer="FooterInfo"
                 xmlns:xi="http://www.w3.org/2001/XInclude" />
 
     <xi:include href="common/Version.xml" xpointer="DateVer"
@@ -40,7 +40,7 @@
 
     <corpname>HPCC Systems</corpname>
 
-   <xi:include href="common/Version.xml" xpointer="Copyright"
+    <xi:include href="common/Version.xml" xpointer="Copyright"
                 xmlns:xi="http://www.w3.org/2001/XInclude" />
 
     <mediaobject role="logo">
@@ -287,14 +287,12 @@
         </listitem>
       </itemizedlist>
 
-      <para>This configuration provides multiple redundant copies of data
-      files. In this example, there are six copies of each file at any given
-      time; eliminating the need to use traditional backup procedures for
-      Roxie data files.</para>
+      <para><?dbfo-need height="8.75in"?>This configuration provides multiple
+      redundant copies of data files. In this example, there are six copies of
+      each file at any given time; eliminating the need to use traditional
+      backup procedures for Roxie data files.</para>
 
-      <para></para>
-
-      <para><graphic fileref="images/RM-03.PNG" /></para>
+      <para><graphic fileref="images/RM-03.jpg" /></para>
 
       <para></para>
     </sect1>
@@ -507,32 +505,8 @@
     </sect1>
   </chapter>
 
-  <chapter id="Packages">
-    <title>Packages</title>
-
-   
-    <para>Packages are used as a means to separate data from queries. Newer
-    Package files can be copied to and loaded on a Roxie cluster without
-    recompiling queries. This allows you to refresh data and ensure you are
-    using identical code in your query.</para>
-
-    <para>This simplifies change control and allows query developers to
-    continue development without the risk of a query being deployed to
-    production before it is ready while still allowing data to be
-    updated.</para>
-
-    <para>Packages provide a reference to data files used in queries that
-    overrides the information originally provided in the query. This affords
-    greater flexibility and control over the data used by a query or a
-    collection of queries.</para>
-
-    <para>The end result is quicker, more flexible process, without the need
-    of recompiling complex queries. This allows you to update data without the
-    chance of deploying new code that has not been approved for migration to
-    production.</para>
-
-    <para>More to follow ***.</para>
-  </chapter>
+  <xi:include href="RDDERef/RDDE_Mods/Packages.xml" xpointer="element(/1)"
+              xmlns:xi="http://www.w3.org/2001/XInclude" />
 
   <chapter id="Deploying-Data-to-a-Cluster-using-DFU">
     <title>Deploying Data to a Cluster using DFU</title>
@@ -593,7 +567,7 @@
                     <row>
                       <entry>Group</entry>
 
-                      <entry>Use the drop-list to select the Roxie cluster to
+                      <entry>Use the drop list to select the Roxie cluster to
                       copy to.</entry>
                     </row>
 
@@ -745,7 +719,7 @@
                     <row>
                       <entry>Group</entry>
 
-                      <entry>Use the drop-list to select the cluster to copy
+                      <entry>Use the drop list to select the cluster to copy
                       to.</entry>
                     </row>
 
@@ -1116,8 +1090,8 @@
           <listitem>
             <?dbfo keep-together="always"?>
 
-            <para>Press the <emphasis role="bold">Submit</emphasis> button.
-            </para>
+            <para>Press the <emphasis role="bold">Submit</emphasis>
+            button.</para>
 
             <para>The resulting page displays all the requested information,
             as shown below:</para>
@@ -1164,7 +1138,7 @@
 
         <para>This option is available only to Roxie cluster. It displays
         diagnostic information about the cluster. See the <emphasis>Roxie
-        Metrics</emphasis><emphasis role="bold"> </emphasis>section in this
+        Metrics</emphasis><emphasis role="bold"></emphasis>section in this
         manual.</para>
 
         <para><emphasis role="bold">Get Processor
@@ -1247,7 +1221,7 @@
         <itemizedlist mark="bullet">
           <listitem>
             <para>Select the <emphasis role="bold">Cluster </emphasis>from the
-            droplist.</para>
+            drop list.</para>
           </listitem>
         </itemizedlist>
 
@@ -1257,8 +1231,8 @@
         <itemizedlist mark="bullet">
           <listitem>
             <para>Select the query type (Suspended, Non-Suspended, or both)
-            from the <emphasis role="bold">Suspended
-            </emphasis>droplist.</para>
+            from the <emphasis role="bold">Suspended </emphasis>drop
+            list.</para>
           </listitem>
 
           <listitem>
@@ -1364,7 +1338,7 @@
           <itemizedlist mark="bullet">
             <listitem>
               <para>Select the <emphasis role="bold">Cluster </emphasis>from
-              the droplist.</para>
+              the drop list.</para>
             </listitem>
           </itemizedlist>
 
@@ -1374,7 +1348,7 @@
           <itemizedlist mark="bullet">
             <listitem>
               <para>Select the file type (Non-Super Files or Super FIles) from
-              the <emphasis role="bold">File Type </emphasis>droplist.</para>
+              the <emphasis role="bold">File Type </emphasis>drop list.</para>
             </listitem>
 
             <listitem>
@@ -1455,7 +1429,7 @@
         <itemizedlist mark="bullet">
           <listitem>
             <para>Select the <emphasis role="bold">Cluster </emphasis>from the
-            droplist.</para>
+            drop list.</para>
           </listitem>
         </itemizedlist>
 
@@ -1465,7 +1439,7 @@
         <itemizedlist mark="bullet">
           <listitem>
             <para>Select the file type (Non-Super Files or Super FIles) from
-            the <emphasis role="bold">File Type </emphasis>droplist.</para>
+            the <emphasis role="bold">File Type </emphasis>drop list.</para>
           </listitem>
 
           <listitem>
@@ -1490,7 +1464,7 @@
 
         <para></para>
 
-        <?hard-pagebreak?>
+        <?hard-pagebreak ?>
 
         <itemizedlist mark="bullet">
           <listitem>

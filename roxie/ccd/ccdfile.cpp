@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #include "jlib.hpp"
@@ -1526,7 +1525,74 @@ public:
     }
 };
 
-ILazyFileIO *createDynamicFile(const char *id, IPartDescriptor *pdesc, RoxieFileType fileType, int numParts)
+IFileDescriptor *checkCloneFrom(const char *id, IFileDescriptor *fdesc)
+{
+    if (id && !strnicmp(id, "foreign", 7)) //if need to support dali hopping should add each remote location
+        return NULL;
+    if (!fdesc || !fdesc->queryProperties().hasProp("@cloneFrom"))
+        return NULL;
+    SocketEndpoint cloneFrom;
+    cloneFrom.set(fdesc->queryProperties().queryProp("@cloneFrom"));
+    if (!cloneFrom.isNull())
+    {
+        CDfsLogicalFileName lfn;
+        lfn.set(id);
+        lfn.setForeign(cloneFrom, false);
+        Owned<IDistributedFile> cloneFile = queryDistributedFileDirectory().lookup(lfn);
+        if (cloneFile)
+        {
+            Owned<IFileDescriptor> cloneFDesc = cloneFile->getFileDescriptor();
+            if (cloneFDesc->numParts()!=fdesc->numParts())
+            {
+                StringBuffer s;
+                DBGLOG(ROXIE_MISMATCH, "File %s cloneFrom(%s) mismatch", id, cloneFrom.getIpText(s).str());
+                return NULL;
+            }
+            return cloneFDesc.getClear();
+        }
+    }
+    return NULL;
+}
+
+IPartDescriptor *queryMatchingRemotePart(IPartDescriptor *pdesc, IFileDescriptor *remoteFDesc, unsigned int partNum)
+{
+    if (!remoteFDesc)
+        return NULL;
+    IPartDescriptor *remotePDesc = remoteFDesc->queryPart(partNum);
+    if (!remotePDesc)
+        return NULL;
+    unsigned int crc, remoteCrc;
+    if (!pdesc || !pdesc->getCrc(crc)) //local crc not available, never DFS copied?
+        return remotePDesc;
+    if (remotePDesc->getCrc(remoteCrc) && remoteCrc==crc)
+        return remotePDesc;
+    return NULL;
+}
+
+inline bool isCopyFromCluster(IPartDescriptor *pdesc, unsigned copy, const char *process)
+{
+    StringBuffer s;
+    unsigned clusterNo = pdesc->copyClusterNum(copy);
+    return strieq(process, pdesc->queryOwner().getClusterGroupName(clusterNo, s));
+}
+
+inline void appendRemoteLocations(IPartDescriptor *pdesc, StringArray &locations, bool checkSelf, unsigned maxAppend=2)
+{
+    unsigned numCopies = pdesc->numCopies();
+    unsigned appended = 0;
+    for (unsigned copy = 0; appended < maxAppend && copy < numCopies; copy++)
+    {
+        if (checkSelf && isCopyFromCluster(pdesc, copy, roxieName.str())) //don't add ourself
+            continue;
+        RemoteFilename r;
+        pdesc->getFilename(copy,r);
+        StringBuffer path;
+        locations.append(r.getRemotePath(path).str());
+        appended++;
+    }
+}
+
+ILazyFileIO *createDynamicFile(const char *id, IPartDescriptor *pdesc, IPartDescriptor *remotePDesc, RoxieFileType fileType, int numParts)
 {
     IPropertyTree &partProps = pdesc->queryProperties();
     offset_t dfsSize = partProps.getPropInt64("@size");
@@ -1555,17 +1621,10 @@ ILazyFileIO *createDynamicFile(const char *id, IPartDescriptor *pdesc, RoxieFile
 
     makePhysicalPartName(logicalname, partNo, numParts, localFileName, false, DFD_OSdefault, baseDataDirectory);  // MORE - if we get the dataDirectory we can pass it in and possibly` reuse an existing file
 
-    unsigned numCopies = pdesc->numCopies();
-    if (numCopies > 2)
-        numCopies = 2;   // only care about maximum of 2 locations at this time
-    for (unsigned copy = 0; copy < numCopies; copy++)
-    {
-        RemoteFilename r;
-        pdesc->getFilename(copy,r);
-        StringBuffer origName;
-        r.getRemotePath(origName);
-        remoteLocations.append(origName.str());
-    }
+    appendRemoteLocations(pdesc, remoteLocations, true);
+    if (remotePDesc)
+        appendRemoteLocations(remotePDesc, remoteLocations, false);
+
     return queryFileCache().lookupFile(id, partNo, fileType, localFileName, NULL, NULL, localLocations, remoteLocations, dfsSize, fileDate, false, true, false, false, crcResources ? crc : 0, pdesc->queryOwner().isCompressed(), NULL);
 }
 
@@ -2026,6 +2085,7 @@ public:
         Owned<CFileIOArray> f = new CFileIOArray();
         f->addFile(NULL, 0);
         IFileDescriptor *fdesc = subFiles.item(0);
+        Owned<IFileDescriptor> remoteFDesc = checkCloneFrom(subNames.item(0), fdesc);
         if (fdesc)
         {
             unsigned numParts = fdesc->numParts();
@@ -2037,7 +2097,8 @@ public:
                     {
                         IPartDescriptor *pdesc = fdesc->queryPart(i-1);
                         assertex(pdesc);
-                        Owned<ILazyFileIO> file = createDynamicFile(subNames.item(0), pdesc, ROXIE_FILE, numParts);
+                        IPartDescriptor *remotePDesc = queryMatchingRemotePart(pdesc, remoteFDesc, i-1);
+                        Owned<ILazyFileIO> file = createDynamicFile(subNames.item(0), pdesc, remotePDesc, ROXIE_FILE, numParts);
                         IPropertyTree &partProps = pdesc->queryProperties();
                         f->addFile(LINK(file), partProps.getPropInt64("@offset"));
                     }
@@ -2103,15 +2164,18 @@ public:
                     Owned<IKeyIndexSet> keyset = createKeyIndexSet();
                     ForEachItemIn(idx, subFiles)
                     {
-                        Owned <ILazyFileIO> part;
                         IFileDescriptor *fdesc = subFiles.item(idx);
+                        Owned<IFileDescriptor> remoteFDesc = checkCloneFrom(subNames.item(idx), fdesc);
+
+                        Owned <ILazyFileIO> part;
                         unsigned crc = 0;
                         if (fdesc) // NB there may be no parts for this channel 
                         {
                             IPartDescriptor *pdesc = fdesc->queryPart(partNo-1);
+                            IPartDescriptor *remotePDesc = queryMatchingRemotePart(pdesc, remoteFDesc, partNo-1);
                             if (pdesc)
                             {
-                                part.setown(createDynamicFile(subNames.item(idx), pdesc, ROXIE_KEY, fdesc->numParts()));
+                                part.setown(createDynamicFile(subNames.item(idx), pdesc, remotePDesc, ROXIE_KEY, fdesc->numParts()));
                                 pdesc->getCrc(crc);
                             }
                         }
@@ -2134,14 +2198,16 @@ public:
             ForEachItemIn(idx, subFiles)
             {
                 IFileDescriptor *fdesc = subFiles.item(idx);
+                Owned<IFileDescriptor> remoteFDesc = checkCloneFrom(subNames.item(idx), fdesc);
                 Owned<IKeyIndexBase> key;
                 if (fdesc)
                 {
                     unsigned numParts = fdesc->numParts();
                     assertex(numParts > 0);
                     IPartDescriptor *pdesc = fdesc->queryPart(numParts - 1);
-                    Owned<ILazyFileIO> keyFile = createDynamicFile(subNames.item(idx), pdesc, ROXIE_KEY, numParts);
-                    unsigned crc;
+                    IPartDescriptor *remotePDesc = queryMatchingRemotePart(pdesc, remoteFDesc, numParts - 1);
+                    Owned<ILazyFileIO> keyFile = createDynamicFile(subNames.item(idx), pdesc, remotePDesc, ROXIE_KEY, numParts);
+                    unsigned crc = 0;
                     pdesc->getCrc(crc);
                     StringBuffer pname;
                     pdesc->getPath(pname);

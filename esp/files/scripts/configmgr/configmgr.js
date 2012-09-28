@@ -1,18 +1,17 @@
 /*##############################################################################
-#    Copyright (C) 2011 HPCC Systems.
+#    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 #
-#    All rights reserved. This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
 #
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
+#       http://www.apache.org/licenses/LICENSE-2.0
 #
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License.
 ############################################################################## */
 
 /*global YAHOO*/
@@ -418,6 +417,8 @@ function createTable(rows, tabDivName, index, compName) {
 
       oContextMenu.dt = myDataTable;
       oContextMenu.subscribe("beforeShow", onContextMenuBeforeShowRegular);
+      top.document.ContextMenuCenter = oContextMenu;
+
       myDataTable.tt = new YAHOO.widget.Tooltip(tabDivName + "tooltip");
 
       myDataTable.subscribe("cellMouseoverEvent", function(oArgs) {
@@ -826,6 +827,14 @@ function handleConfigCellClickEvent(oArgs, caller, isComplex) {
         showPrevCellEditor(this);
 
       return;
+    }
+
+    if (record._oData.name === "name")
+    {
+      top.document.ResetFocus = true;
+      top.document.ResetFocusValueName = newValue;
+      if (typeof(record._oData.compType) !== "undefined")
+       top.document.ResetFocusCompType = record._oData.compType;
     }
     var attrName = getAttrName(datatable, column, record, isComplex); // = record.getData('name');
     var recordIndex = datatable.getRecordIndex(record);
@@ -1609,7 +1618,7 @@ function createMultiColTreeCtrlForComp(rows, compName, subRecordIndex) {
         lazyload: true
       });
 
-      top.document.ContextMenu = oContextMenu;
+      top.document.ContextMenuCenter = oContextMenu;
 
       oContextMenu.dt = dt;
       oContextMenu.subscribe("beforeShow", onContextMenuBeforeShow);
@@ -1787,6 +1796,104 @@ function createEnvXmlView(allrows, compName, subRecordIndex) {
         width: "100%"
       });
 
+      function onContextMenuBeforeShowDeleteContextMenu(p_sType, p_aArgs) {
+        var record = top.document.rightDT.getRecordSet().getRecord(top.document.rightDT.getSelectedRows()[0]);
+        var pp = parseParamsForXPath( record.getData('params'), top.document.rightDT.getRecordSet().getRecord(top.document.rightDT.getSelectedRows()[0]).getData('name'),
+                   top.document.rightDT.getRecordSet().getRecord(top.document.rightDT.getSelectedRows()[0]).getData('value'),
+                   record.getData('hasChildren') == undefined ? false : record.getData('hasChildren') );
+
+        var xmlStr = "<XmlArgs><Setting operation=\"delete\" params= \"" + pp + "\"/></XmlArgs>";
+
+        YAHOO.util.Connect.asyncRequest('POST', '/WsDeploy/HandleAttributeDelete', {
+          success: function(o) {
+            top.document.forms['treeForm'].isChanged.value = "true";
+            top.document.choice = new Array();
+            top.document.choice[0] = top.document.rightDT.getRecordIndex(top.document.rightDT.getSelectedRows()[0]);
+            var recDepth =  top.document.rightDT.getRecord(top.document.choice[0])._oData.depth;
+
+            var index = 0;
+            for (counter = top.document.choice[0]; counter >= 0; counter--)
+            {
+              if (top.document.rightDT.getRecord(counter)._oData.depth < recDepth)
+              {
+                top.document.choice[index] = top.document.rightDT.getRecord(counter).getData('params');
+                recDepth = top.document.rightDT.getRecord(counter)._oData.depth;
+                index++;
+              }
+            }
+
+            top.document.doJumpToChoice = true;
+            doPageRefresh();
+
+             YAHOO.util.UserAction.click(top.document.rightDT.getFirstTrEl());
+           },
+          failure: function(o) {
+            alert("Failed to delete attribute.  (XPath maybe ambiguous. A manual edit of the XML configuration file maybe required to delete this attribute.) ");
+            },
+          scope: this
+        },
+          top.document.navDT.getFileName(true) + 'XmlArgs=' + xmlStr + '&bLeaf=' + (record.getData('hasChildren') == undefined ? false : !record.getData('hasChildren') ));
+        }
+      function onContextMenuXBeforeShow(p_sType, p_aArgs)
+      {
+        if (top.document.getElementById('ReadWrite').checked == true)
+          oContextMenuX.cfg.setProperty('disabled',false);
+        else
+          oContextMenuX.cfg.setProperty('disabled',true);
+
+        top.document.ContextMenuCenter = this;
+      }
+
+      function onTriggerContextMenu(p_oEvent)
+      {
+        if (top.document.rightDT.getRecord(top.document.rightDT.getSelectedRows()[0])._oData.hasChildren == true)  // only allow attributes to be deleted
+          this.cancel();
+      }
+      var aMenuItemsX = [{text: "Delete", onclick: { fn: onContextMenuBeforeShowDeleteContextMenu}  }];
+      top.document.rightDT = dt;
+      top.document.rightDT.expandRecord = function(id) {
+      var recSet = top.document.rightDT.getRecordSet();
+
+      if (typeof (id) === 'undefined') {
+        var tdEl = top.document.rightDT.getFirstTdEl(recSet.getRecord(0));
+        var children = Dom.getChildren(tdEl);
+        if (Dom.hasClass(children[0].children[0].children[0], 'yui-button')) {
+          children[0].children[0].children[0].click();
+          return;
+        }
+      }
+
+      var recSetLen = recSet.getLength();
+      for (var i = 0; i < recSetLen; i++) {
+        var r = recSet.getRecord(i);
+        if (r.getData('id') === id) {
+          if (r.getData('parent') != -1)
+            top.document.rightDT.expandRecord(r.getData('parent'));
+          var tdEl = top.document.rightDT.getFirstTdEl(r);
+          var children = Dom.getChildren(tdEl);
+          if (Dom.hasClass(children[0].children[0].children[0], 'yui-button') &&
+                Dom.hasClass(children[0].children[0].children[0], 'buttoncollapsed')) {
+            children[0].children[0].children[0].click();
+            break;
+          }
+          else {
+            top.document.rightDT.unselectAllRows();
+            top.document.rightDT.selectRow(r);
+            break;
+          }
+        }
+        }
+      }
+
+      var oContextMenuX = new YAHOO.widget.ContextMenu( "EnvironmentTabCM2", { trigger: dt.getTbodyEl(), lazyload: true, itemdata: aMenuItemsX, container: tabNameTemp});
+      top.document.ContextMenuCenter = oContextMenuX;
+
+
+     oContextMenuX.subscribe("triggerContextMenu", onTriggerContextMenu);
+
+      oContextMenuX.dt = dt;
+      oContextMenuX.subscribe("beforeShow",onContextMenuXBeforeShow);
+
       tab.dt = dt;
       tab.dataSource = myDataSource;
       dt.subscribe("rowMouseoutEvent", dt.onEventUnhighlightRow);
@@ -1861,6 +1968,26 @@ function createEnvXmlView(allrows, compName, subRecordIndex) {
         top.document.navDT.getWaitDlg().hide();
 
         top.document.stopWait(document);
+
+        var lastCounter2 = 0;
+        if (top.document.doJumpToChoice == true)
+        {
+          for (counter = top.document.choice.length-1; counter >= 0; counter--)
+          {
+            for (counter2 = lastCounter2; true; counter2++)
+            {
+              if (this.getRecord(counter2).getData('params') == top.document.choice[counter])
+              {
+                this.expandRecord(counter2);
+                lastCounter2 = counter2;
+                break;
+              }
+            }
+          }
+
+          Dom.getChildren(this.getFirstTdEl(this.getRecord(this.getRecordIndex(this.getSelectedRows()[0]))))[0].children[0].children[0].focus();
+          top.document.doJumpToChoice = false;
+        }
       });
 
       dt.subscribe("tableKeyEvent", function(oArgs) {
@@ -2002,6 +2129,8 @@ function createEnvXmlView(allrows, compName, subRecordIndex) {
         trigger: tabNameTemp,
         lazyload: true
       });
+
+      top.document.ContextMenuCenter = oContextMenu;
 
       oContextMenu.dt = dt;
       oContextMenu.subscribe("beforeShow", onContextMenuBeforeShow);
@@ -2387,6 +2516,9 @@ function onMenuItemClickThorTopology(p_sType, p_aArgs, p_oValue) {
   top.document.navDT.promptThorTopology(top.document.navDT, type, slavesPresent, slavesPerNode);
 }
 function onContextMenuBeforeShow(p_sType, p_aArgs) {
+  if (top.document.ContextMenuLeft != null)
+    top.document.ContextMenuLeft.clearContent();
+
   if (!this.configContextMenuItems) {
     this.configContextMenuItems = {
       "Roxie Cluster": [
@@ -2957,6 +3089,32 @@ function onMenuItemClickHandleEspServiceBindings(p_sType, p_aArgs, p_oValue) {
   top.document.navDT.getFileName(true) + 'Operation=' + oper + '&XmlArgs=' + xmlArgs);
 }
 
+function onMenuItemClickHandleComputerItemsCopy(p_sType, p_aArgs, p_oValue)
+{
+  var label = top.document.RightTabView.getTab(top.document.RightTabView.get('activeIndex')).get('label');
+
+  if (label === "Computer Types")
+    label = "ComputerType";
+  else if (label === "Switches")
+    label = "Switch";
+  else if (label === "Domains")
+    label = "Domain"
+  else if (label === "Computers")
+    label = "Computer"
+
+  var dt = top.document.RightTabView.getTab(top.document.RightTabView.get('activeIndex')).dt;
+
+  for (counter = 0; counter < dt.getSelectedRows().length; counter++)
+  {
+    var rec = dt.getRecord(dt.getRecordIndex(dt.getSelectedRows()[counter]));
+    var param = label + rec.getData('params').split("subTypeKey=")[1];
+
+    param = param.replace(/\@/g,'').replace(/\[/g,' ').replace(/\]/g,' ');
+
+    top.document.copyHWSWTo(p_oValue.element.innerText, true, param);
+  }
+}
+
 function onMenuItemClickHandleComputer(p_sType, p_aArgs, p_oValue) {
   var form = top.document.forms['treeForm'];
   if (form.isLocked.value === 'false')
@@ -3073,10 +3231,22 @@ function onContextMenuBeforeShowRegular(p_sType, p_aArgs) {
       "Computers": [
                                 { text: "New", onclick: { fn: onMenuItemClickHandleComputer} },
                                 { text: "New Range...", onclick: { fn: onMenuItemClickHandleComputer} },
-                                { text: "Delete", onclick: { fn: onMenuItemClickHandleComputer}}],
+                                { text: "Delete", onclick: { fn: onMenuItemClickHandleComputer} },
+                                { text: "Copy Hardware Item(s) To",
+                                  submenu: {
+                                    id: "HWCopyItems",
+                                    lazyload: true,
+                                    itemdata: top.document.copyCompMenu2
+                                    } } ],
       "Hardware": [
                                 { text: "New", onclick: { fn: onMenuItemClickHandleComputer} },
-                                { text: "Delete", onclick: { fn: onMenuItemClickHandleComputer} }
+                                { text: "Delete", onclick: { fn: onMenuItemClickHandleComputer} },
+                                { text: "Copy Hardware Item(s) To",
+                                  submenu: {
+                                     id: "HWCopyItems",
+                                     lazyload: true,
+                                     itemdata: top.document.copyCompMenu2
+                                    } }
                                 ],
       "GenericAddDelete": [
                                 { text: "Add", onclick: { fn: onMenuItemClickGenericAddDelete} },
@@ -3087,7 +3257,14 @@ function onContextMenuBeforeShowRegular(p_sType, p_aArgs) {
      };
   }
 
-  var oTarget = this.contextEventTarget, aMenuItems, aClasses;
+  for (var count = 0; count < this.configContextMenuItems.Hardware[2].submenu.itemdata.length; count++)
+  {
+    if (typeof(this.configContextMenuItems.Hardware[2].submenu.itemdata[count]) !== 'undefined')
+      this.configContextMenuItems.Hardware[2].submenu.itemdata[count].onclick.fn  = onMenuItemClickHandleComputerItemsCopy;
+  }
+
+
+var oTarget = this.contextEventTarget, aMenuItems, aClasses;
   if (this.getRoot() === this) {
     var Dom = YAHOO.util.Dom;
     var oSelectedTR = oTarget.nodeName.toUpperCase() === "TR" ?
@@ -3138,7 +3315,10 @@ function onContextMenuBeforeShowRegular(p_sType, p_aArgs) {
     }
 
     if( record && record.getData('_not_in_env') === 1 && record.getData(column.key + '_ctrlType') !== 0)
+    {
+      top.document.ContextMenuCenter = this;
       this.addItems(oContextMenuItems["WriteToEnvironment"]);
+    }
 
     if( record && record.getData(column.key + '_ctrlType') !== 0 ) {
         var defaultValue=dt.getDefault(oTarget, record);
@@ -3366,6 +3546,8 @@ function handlekeydown(event) {
 
 function handlemousedown(event) {
 top.document.navDT.fireEvent("tableBlurEvent");
+if (top.document.ContextMenuLeft != null)
+  top.document.ContextMenuLeft.clearContent();
 }
 
 function getAttrName(datatable, column, record, isComplex) {
@@ -3399,6 +3581,61 @@ function setChildrenOf(parent, rec) {
     childrenOf[parent] = new Array();
  
   childrenOf[parent][childrenOf[parent].length] = rec;
+}
+
+function parseParamsForXPath(params, key, value, hasChildren)
+{
+  var splitParams = params.split(":");
+  var xpath = "";
+
+  for (idx = splitParams.length-1; idx >= 0; idx--)
+  {
+    var pcTypePos = splitParams[idx].indexOf("pcType");
+    var pcNamePos = splitParams[idx].indexOf("pcName");
+
+    if (pcTypePos != -1)
+    {
+      if ( splitParams[idx].substr(pcTypePos+7) === "Environment" )
+        xpath = "./";
+      else
+       xpath = xpath + splitParams[idx].substr(pcTypePos+7) + "/";
+    }
+    else if (pcNamePos != -1)
+    {
+      if (splitParams[idx].substr(pcNamePos+8) != "")
+      {
+        if (xpath[xpath.length-1] === ']')
+        {
+          xpath = xpath + "/";
+        }
+        xpath = xpath + splitParams[idx-1].substr(pcTypePos+8);
+        xpath = xpath + "[@name='" + splitParams[idx].substr(pcNamePos+7) + "']";
+        idx--;
+      }
+      else if (xpath[xpath.length-1] == ']')
+      {
+        xpath = xpath + "/";
+      }
+    }
+  }
+
+  if (hasChildren == true || xpath.substr(0,14) == "./EnvSettings/")
+    return xpath;
+
+  if (key === "name")
+  {
+    xpath = xpath + "]";
+  }
+  else
+  {
+    if (xpath[xpath.length-1] == '/')
+    {
+      xpath = xpath.substring(0,xpath.length-1);
+    }
+    xpath = xpath + "[@" + key + "='" + value + "']"
+  }
+
+  return xpath;
 }
 
 function initEnvXmlType(i) {
@@ -3508,11 +3745,11 @@ function onMenuItemClickResetToDefault(p_sType, p_aArgs, p_oValue)
   var column = dt.getColumn(oTarget);
   var compName = top.document.navDT.getRecord(top.document.navDT.getSelectedRows()[0]).getData('Name');
   var bldSet = top.document.navDT.getRecord(top.document.navDT.getSelectedRows()[0]).getData('BuildSet');
-  var newValue = dt.getDefault(oTarget, record);
   var meta = record.getData(column.key + '_extra');
   var menuItemName = this.cfg.getProperty("text");
   var flag = (menuItemName === 'Write to environment');
-  
+  var newValue = (flag ? oldValue : dt.getDefault(oTarget, record));
+
   if (flag || newValue !== oldValue) {
      var form = top.window.document.forms['treeForm'];
      top.document.startWait(document);

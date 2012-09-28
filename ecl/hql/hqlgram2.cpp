@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 #include "platform.h"
 #include <stdio.h>
@@ -441,23 +440,37 @@ void HqlGram::pushTopScope(IHqlExpression *newScope)
     insideEvaluate = false;
 }
 
-void HqlGram::pushLeftScope(IHqlExpression *newScope)
+void HqlGram::pushLeftRightScope(IHqlExpression * left, IHqlExpression * right)
 {
-    newScope->Link();
-    leftScopes.append(*newScope);
+    LeftRightScope * newScope = new LeftRightScope;
+    newScope->left.set(left);
+    newScope->right.set(right);
+    newScope->selSeq.setown(createActiveSelectorSequence(left, right));
+    leftRightScopes.append(*newScope);
 }
 
-void HqlGram::pushRightScope(IHqlExpression *newScope)
+void HqlGram::pushPendingLeftRightScope(IHqlExpression * left, IHqlExpression * right)
 {
-    newScope->Link();
-    rightScopes.append(*newScope);
+    LeftRightScope * newScope = new LeftRightScope;
+    newScope->left.set(left);
+    newScope->right.set(right);
+    leftRightScopes.append(*newScope);
 }
 
-void HqlGram::pushRowsScope(IHqlExpression *newScope)
+void HqlGram::setRightScope(IHqlExpression *newScope)
 {
-    newScope->Link();
-    rowsScopes.append(*newScope);
-    rowsIds.append(*createUniqueRowsId());
+    LeftRightScope & topScope = leftRightScopes.tos();
+    topScope.right.set(newScope);
+    if (!topScope.selSeq)
+        topScope.selSeq.setown(createActiveSelectorSequence(topScope.left, topScope.right));
+}
+
+void HqlGram::beginRowsScope(node_operator side)
+{
+    LeftRightScope & topScope = leftRightScopes.tos();
+    IHqlExpression * ds = (side == no_left) ? topScope.left : topScope.right;
+    topScope.rowsScope.setown(createSelector(side, ds, topScope.selSeq));
+    topScope.rowsId.setown(createUniqueRowsId());
 }
 
 /* in: linked */
@@ -481,27 +494,17 @@ void HqlGram::popTopScope()
     }
 }                                       
 
-void HqlGram::popLeftScope()
+IHqlExpression * HqlGram::endRowsScope()
 {
-    if(leftScopes.length() > 0)
-        leftScopes.pop();
-}  
-
-void HqlGram::popRightScope()
-{
-    if(rightScopes.length() > 0)
-        rightScopes.pop();
-} 
-
-IHqlExpression * HqlGram::popRowsScope()
-{
-    if(rowsScopes.length() > 0)
+    if(leftRightScopes.length() > 0)
     {
-        rowsScopes.pop();
-        return &rowsIds.popGet();
+        LeftRightScope & tos = leftRightScopes.tos();
+        tos.rowsScope.clear();
+        return tos.rowsId.getClear();
     }
+
     return createAttribute(_rowsid_Atom, createConstant(0));
-} 
+}
 
 void HqlGram::popSelfScope()
 {
@@ -509,18 +512,30 @@ void HqlGram::popSelfScope()
         selfScopes.pop();
 } 
 
-void HqlGram::swapTopScopeForLeftScope()
-{
-    assertex(topScopes.ordinality() > 0);
-    leftScopes.append(topScopes.popGet());
-}                                       
-
 IHqlExpression * HqlGram::getSelectorSequence()
 {
-    if (activeSelectorSequences.ordinality())
-        return LINK(&activeSelectorSequences.tos());
+    if (leftRightScopes.ordinality())
+        return LINK(leftRightScopes.tos().selSeq);
     //Can occur when LEFT is used in an invalid context
     return createDummySelectorSequence();
+}
+
+IHqlExpression * HqlGram::getSelector(const attribute & errpos, node_operator side)
+{
+    ForEachItemInRev(i, leftRightScopes)
+    {
+        LeftRightScope & curScope = leftRightScopes.item(i);
+        if (curScope.selSeq)
+        {
+            IHqlExpression * ds = (side == no_left) ? curScope.left : curScope.right;
+            if (ds)
+                return createSelector(side, ds, curScope.selSeq);
+        }
+    }
+    const char * sideText = (side == no_left) ? "LEFT" : "RIGHT";
+    reportError(ERR_LEFT_ILL_HERE, errpos, "%s not legal here", sideText);
+    OwnedHqlExpr selSeq = createDummySelectorSequence();
+    return createSelector(side, queryNullRecord(), selSeq);
 }
 
 void HqlGram::pushLocale(IHqlExpression *newLocale)
@@ -551,6 +566,13 @@ IHqlExpression* HqlGram::popRecord()
     return &activeRecords.pop();
 }                                       
 
+IHqlExpression* HqlGram::endRecordDef()
+{
+    IHqlExpression * record = popRecord();
+    record->Link();     // logically link should be in startrecord, but can only link after finished updating
+    popSelfScope();
+    return record->closeExpr();
+}
 
 void HqlGram::beginFunctionCall(attribute & function)
 {
@@ -607,62 +629,35 @@ IHqlExpression * HqlGram::createUniqueId()
     return ::createUniqueId();
 }
 
-IHqlExpression * HqlGram::doCreateUniqueSelectorSequence()
-{
-    HqlExprArray args;
-    ForEachItemIn(i, defineScopes)
-    {
-        ActiveScopeInfo & curScope = defineScopes.item(i);
-        appendArray(args, curScope.activeParameters);
-    }
-
-    if (args.ordinality())
-    {
-        args.add(*createUniqueId(), 0);
-        return createAttribute(_selectorSequence_Atom, args);
-    }
-    return ::createUniqueSelectorSequence();
-}
-
-
-
 IHqlExpression * HqlGram::createActiveSelectorSequence(IHqlExpression * left, IHqlExpression * right)
 {
 #ifdef USE_SELSEQ_UID
     if (left || right)
     {
         HqlExprArray args;
-        if (left) args.append(*LINK(left->queryNormalizedSelector()));
-        if (right) args.append(*LINK(right->queryNormalizedSelector()));
-        return createAttribute(_selectorSequence_Atom, args);
+        if (left)
+            args.append(*LINK(left->queryNormalizedSelector()));
+        if (right)
+            args.append(*LINK(right->queryNormalizedSelector()));
+        return createExprAttribute(_selectorSequence_Atom, args);
     }
 
     return ::createUniqueSelectorSequence();
-
-    return doCreateUniqueSelectorSequence();
 #else
     return createSelectorSequence();
 #endif
 }
 
-void HqlGram::pushSelectorSequence(IHqlExpression * ds1, IHqlExpression * ds2)
+IHqlExpression * HqlGram::popLeftRightScope()
 {
-    IHqlExpression * selSeq = createActiveSelectorSequence(ds1, ds2);   
-    activeSelectorSequences.append(*selSeq);
-}
+    if (leftRightScopes.ordinality())
+    {
+        LinkedHqlExpr selSeq(leftRightScopes.tos().selSeq);
+        leftRightScopes.pop();
+        return selSeq.getClear();
+    }
 
-void HqlGram::pushUniqueSelectorSequence()
-{
-    IHqlExpression * selSeq = ::createUniqueSelectorSequence();
-    activeSelectorSequences.append(*selSeq);
-}
-
-IHqlExpression * HqlGram::popSelectorSequence()
-{
-    if (activeSelectorSequences.ordinality())
-        return &activeSelectorSequences.popGet();
-    else
-        return createDummySelectorSequence();
+    return createDummySelectorSequence();
 }
 
 void HqlGram::beginList()
@@ -1050,21 +1045,32 @@ IHqlExpression * HqlGram::processModuleDefinition(const attribute & errpos)
 IHqlExpression * HqlGram::processRowset(attribute & selectorAttr)
 {
     OwnedHqlExpr ds = selectorAttr.getExpr();
-    unsigned match = rowsScopes.find(*ds);
-    IHqlExpression * id = NULL;
-    if (match == NotFound)
+    bool hadRows = false;
+    OwnedHqlExpr id;
+    ForEachItemInRev(i, leftRightScopes)
     {
-        if (rowsScopes.ordinality() == 0)
-            reportError(ERR_LEFT_ILL_HERE, selectorAttr, "ROWS not legal here");
+        LeftRightScope & curScope = leftRightScopes.item(i);
+        if (curScope.rowsScope == ds)
+        {
+            id.set(curScope.rowsId);
+            break;
+        }
+        else if (curScope.rowsScope)
+            hadRows = true;
+    }
+
+    if (!id)
+    {
+        if (!hadRows)
+            reportError(ERR_LEFT_ILL_HERE, selectorAttr, "ROWSET not legal here");
         else
-            reportError(ERR_LEFT_ILL_HERE, selectorAttr, "ROWS not legal on this dataset");
+            reportError(ERR_LEFT_ILL_HERE, selectorAttr, "ROWSET not legal on this dataset");
 
         OwnedHqlExpr selSeq = createDummySelectorSequence();
         ds.setown(createSelector(no_left, queryNullRecord(), selSeq));
     }
-    else
-        id = &OLINK(rowsIds.item(match));
-    OwnedHqlExpr rows = createDataset(no_rows, LINK(ds), id);
+
+    OwnedHqlExpr rows = createDataset(no_rows, LINK(ds), LINK(id));
     return createValue(no_rowset, makeSetType(rows->getType()), LINK(rows));
 }
 
@@ -2329,6 +2335,22 @@ void HqlGram::addDatasetField(const attribute &errpos, _ATOM name, IHqlExpressio
     record->Release();
 }
 
+void HqlGram::addDictionaryField(const attribute &errpos, _ATOM name, IHqlExpression * record, IHqlExpression *value, IHqlExpression * attrs)
+{
+    if (!name)
+        name = createUnnamedFieldName();
+    checkFieldnameValid(errpos, name);
+    if (queryPropertyInList(virtualAtom, attrs))
+        reportError(ERR_BAD_FIELD_ATTR, errpos, "Virtual can only be specified on a scalar field");
+    if (!attrs)
+        attrs = extractAttrsFromExpr(value);
+
+    ITypeInfo * type = makeDictionaryType(makeRowType(createRecordType(record)));
+    IHqlExpression *newField = createField(name, type, value, attrs);
+    addToActiveRecord(newField);
+    record->Release();
+}
+
 void HqlGram::addIfBlockToActive(const attribute &errpos, IHqlExpression * ifblock)
 {
     activeRecords.tos().addOperand(LINK(ifblock));
@@ -2541,7 +2563,7 @@ class PseudoPatternScope : public CHqlScope
 {
 public:
     PseudoPatternScope(IHqlExpression * _patternList);
-    IMPLEMENT_IINTERFACE
+    IMPLEMENT_IINTERFACE_USING(CHqlScope)
 
     virtual void defineSymbol(_ATOM name, _ATOM moduleName, IHqlExpression *value, bool isExported, bool isShared, unsigned flags, IFileContents *fc, int bodystart, int lineno, int column) { ::Release(value); PSEUDO_UNIMPLEMENTED; }
     virtual void defineSymbol(_ATOM name, _ATOM moduleName, IHqlExpression *value, bool isExported, bool isShared, unsigned flags) { ::Release(value); PSEUDO_UNIMPLEMENTED; }
@@ -2589,9 +2611,7 @@ void HqlGram::releaseScopes()
     while(topScopes.length()>0)
         popTopScope();
 
-    leftScopes.kill();
-    rightScopes.kill();
-    rowsScopes.kill();
+    leftRightScopes.kill();
     
     while (selfScopes.length()>0)
         popSelfScope();
@@ -2769,20 +2789,6 @@ IHqlExpression *HqlGram::getTopScope()
     return ret;
 }
 
-IHqlExpression *HqlGram::getLeftScope()
-{
-    if (!leftScopes.length())
-        return NULL;
-    return &OLINK(leftScopes.tos());
-}
-
-IHqlExpression *HqlGram::getRightScope()
-{
-    if (!rightScopes.length())
-        return NULL;
-    return &OLINK(rightScopes.tos());
-}
-
 IHqlExpression *HqlGram::getSelfScope()
 {
     if (!selfScopes.length())
@@ -2794,40 +2800,47 @@ IHqlExpression *HqlGram::getSelfScope()
 
 IHqlExpression *HqlGram::queryLeftScope()
 {
-    if (!leftScopes.length())
-        return NULL;
-    return &leftScopes.tos();
+    ForEachItemInRev(i, leftRightScopes)
+    {
+        LeftRightScope & curScope = leftRightScopes.item(i);
+        if (curScope.left)
+            return curScope.left;
+    }
+    return NULL;
 }
 
 IHqlExpression *HqlGram::queryRightScope()
 {
-    if (!rightScopes.length())
-        return NULL;
-    return &rightScopes.tos();
-}
-
-IHqlExpression *HqlGram::queryRowsScope()
-{
-    if (!rowsScopes.length())
-        return NULL;
-    return &rowsScopes.tos();
+    ForEachItemInRev(i, leftRightScopes)
+    {
+        LeftRightScope & curScope = leftRightScopes.item(i);
+        if (curScope.right)
+            return curScope.right;
+    }
+    return NULL;
 }
 
 IHqlExpression *HqlGram::resolveRows(const attribute & errpos, IHqlExpression * ds)
 {
-    unsigned match = rowsScopes.find(*ds);
-    if (match == NotFound)
+    bool hadRows = false;
+    ForEachItemInRev(i, leftRightScopes)
     {
-        if (rowsScopes.ordinality() == 0)
-            reportError(ERR_LEFT_ILL_HERE, errpos, "ROWS not legal here");
-        else
-            reportError(ERR_LEFT_ILL_HERE, errpos, "ROWS not legal on this dataset");
-
-        return createDataset(no_null, LINK(ds->queryRecord()));
+        LeftRightScope & curScope = leftRightScopes.item(i);
+        if (curScope.rowsScope == ds)
+        {
+            IHqlExpression * id = LINK(curScope.rowsId);
+            return createDataset(no_rows, LINK(ds), id);
+        }
+        else if (curScope.rowsScope)
+            hadRows = true;
     }
 
-    IHqlExpression * id = &OLINK(rowsIds.item(match));
-    return createDataset(no_rows, LINK(ds), id);
+    if (!hadRows)
+        reportError(ERR_LEFT_ILL_HERE, errpos, "ROWS not legal here");
+    else
+        reportError(ERR_LEFT_ILL_HERE, errpos, "ROWS not legal on this dataset");
+
+    return createDataset(no_null, LINK(ds->queryRecord()));
 }
 
 
@@ -3063,6 +3076,13 @@ IHqlExpression *HqlGram::lookupSymbol(IHqlScope * scope, _ATOM searchName)
     return scope->lookupSymbol(searchName, LSFpublic, lookupCtx);
 }
 
+unsigned HqlGram::extraLookupFlags(IHqlScope * scope)
+{
+    if (scope == containerScope)
+        return LSFsharedOK;
+    return 0;
+}
+
 IHqlExpression *HqlGram::lookupSymbol(_ATOM searchName, const attribute& errpos)
 {
 #if 0
@@ -3116,7 +3136,10 @@ IHqlExpression *HqlGram::lookupSymbol(_ATOM searchName, const attribute& errpos)
 
         if (modScope)
         {
-            return modScope->lookupSymbol(searchName, LSFrequired, lookupCtx);
+            OwnedHqlExpr resolved = modScope->lookupSymbol(searchName, LSFrequired|LSFsharedOK, lookupCtx);
+            if (resolved && (modScope != containerScope) && !isExported(resolved))
+                reportError(HQLERR_CannotAccessShared, errpos, "Cannot access SHARED symbol '%s' in another module", searchName->str());
+            return resolved.getClear();
         }
 
         // Then come implicitly defined fields...
@@ -3213,7 +3236,7 @@ IHqlExpression *HqlGram::lookupSymbol(_ATOM searchName, const attribute& errpos)
         ForEachItemIn(idx2, defaultScopes)
         {
             IHqlScope &plugin = defaultScopes.item(idx2);
-            IHqlExpression *ret = plugin.lookupSymbol(searchName, LSFpublic, lookupCtx);
+            IHqlExpression *ret = plugin.lookupSymbol(searchName, LSFpublic|extraLookupFlags(&plugin), lookupCtx);
             if (ret)
             {
                 recordLookupInTemplateContext(searchName, ret, templateScope);
@@ -3821,6 +3844,9 @@ void HqlGram::normalizeExpression(attribute & exprAttr, type_t expectedType, boo
         break;
     case type_set:
         checkList(exprAttr);
+        break;
+    case type_dictionary:
+        checkDictionary(exprAttr);
         break;
     case type_table:
         ensureDataset(exprAttr);
@@ -6749,7 +6775,7 @@ void HqlGram::checkIndexFieldType(IHqlExpression * expr, bool isPayload, bool in
                 {
                     if (type->isSigned() ||
                         ((type->getTypeCode() == type_littleendianint) && (type->getSize() != 1)))
-                        reportWarning(ERR_INDEX_BADTYPE, errpos.pos, "Signed or little-endian field %s is not supported inside a keyed record field ", name->str());
+                        reportError(ERR_INDEX_BADTYPE, errpos.pos, "Signed or little-endian field %s is not supported inside a keyed record field ", name->str());
                 }
                 break;
             default:
@@ -7676,6 +7702,7 @@ void HqlGram::ensureDataset(attribute & attr)
     }
     checkDataset(attr);
 }
+
 void HqlGram::expandPayload(HqlExprArray & fields, IHqlExpression * payload, IHqlSimpleScope * scope, ITypeInfo * & lastFieldType, const attribute & errpos)
 {
     ForEachChild(i2, payload)
@@ -7717,10 +7744,45 @@ void HqlGram::expandPayload(HqlExprArray & fields, IHqlExpression * payload, IHq
     }
 }
 
-void HqlGram::modifyIndexPayloadRecord(SharedHqlExpr & record, SharedHqlExpr & payload, SharedHqlExpr & extra, const attribute & errpos)
+void HqlGram::mergeDictionaryPayload(SharedHqlExpr & record, SharedHqlExpr & payload, const attribute & errpos)
 {
+    checkRecordIsValid(errpos, record.get());
     IHqlSimpleScope * scope = record->querySimpleScope();
 
+    // Move all the attributes to the front of the record
+    HqlExprArray fields;
+    ForEachChild(i3, record)
+    {
+        IHqlExpression * cur = record->queryChild(i3);
+        if (cur->isAttribute())
+            fields.append(*LINK(cur));
+    }
+    ForEachChild(i1, record)
+    {
+        IHqlExpression * cur = record->queryChild(i1);
+        if (!cur->isAttribute())
+            fields.append(*LINK(cur));
+    }
+
+    unsigned payloadCount = 0;
+    ITypeInfo * lastFieldType = NULL;
+    if (payload)
+    {
+        unsigned oldFields = fields.ordinality();
+        expandPayload(fields, payload,  scope, lastFieldType, errpos);
+        payloadCount = fields.ordinality() - oldFields;
+    }
+    fields.add(*createAttribute(_payload_Atom, createConstant((__int64) payloadCount)), 0);
+    record.setown(createRecord(fields));
+}
+
+
+void HqlGram::modifyIndexPayloadRecord(SharedHqlExpr & record, SharedHqlExpr & payload, SharedHqlExpr & extra, const attribute & errpos)
+{
+    checkRecordIsValid(errpos, record.get());
+    IHqlSimpleScope * scope = record->querySimpleScope();
+
+    // Move all the attributes to the front of the record
     HqlExprArray fields;
     ForEachChild(i3, record)
     {
@@ -7767,7 +7829,7 @@ void HqlGram::modifyIndexPayloadRecord(SharedHqlExpr & record, SharedHqlExpr & p
         payloadCount++;
     }
 
-    extra.setown(createComma(extra.getClear(), createAttribute(_payload_Atom, createConstant((__int64)payloadCount))));
+    extra.setown(createComma(extra.getClear(), createAttribute(_payload_Atom, createConstant((__int64) payloadCount))));
     record.setown(createRecord(fields));
 }
 
@@ -7812,32 +7874,6 @@ IHqlExpression * HqlGram::extractTransformFromExtra(SharedHqlExpr & extra)
     }
     return ret;
 }
-            
-
-void HqlGram::applyPayloadAttribute(const attribute & errpos, IHqlExpression * record, SharedHqlExpr & extra)
-{
-    IHqlExpression * payload = queryPropertyInList(payloadAtom, extra);
-    if (payload)
-    {
-        HqlExprArray fields;
-        unwindChildren(fields, record);
-        IHqlExpression * search = payload->queryChild(0);
-        if (search->getOperator() == no_select)
-            search = search->queryChild(1);
-        unsigned match = fields.find(*search);
-        if (match != NotFound)
-        {
-            HqlExprArray args;
-            extra->unwindList(args, no_comma);
-            args.zap(*payload);
-            args.append(*createAttribute(_payload_Atom, createConstant((__int64)fields.ordinality()-match)));
-            extra.setown(createComma(args));
-        }
-        else
-            reportError(ERR_TYPEMISMATCH_RECORD, errpos, "The argument to the payload isn't found in the index record");
-    }
-}
-
 
 void HqlGram::checkBoolean(attribute &atr)
 {
@@ -7867,6 +7903,15 @@ void HqlGram::checkDataset(attribute &atr)
     {
         reportError(ERR_EXPECTED_DATASET, atr, "Expected dataset expression");
         atr.release().setExpr(createNullDataset());
+    }
+}
+
+void HqlGram::checkDictionary(attribute &atr)
+{
+    if (!atr.queryExpr()->isDictionary())
+    {
+        reportError(ERR_EXPECTED_DATASET, atr, "Expected dictionary expression");
+        atr.release().setExpr(createNullDictionary());
     }
 }
 
@@ -8129,7 +8174,7 @@ IHqlExpression * HqlGram::checkEnsureRecordsMatch(IHqlExpression * left, IHqlExp
         return LINK(right);
     
     HqlExprArray assigns;
-    OwnedHqlExpr seq = createSelectorSequence();
+    OwnedHqlExpr seq = createActiveSelectorSequence(right, NULL);
     OwnedHqlExpr rightSelect = createSelector(no_left, right, seq);
     OwnedHqlExpr leftSelect = getSelf(left);
     if (!checkRecordCreateTransform(assigns, left->queryRecord(), leftSelect, right->queryRecord(), rightSelect, errpos))
@@ -8223,7 +8268,7 @@ static bool isZeroSize(IHqlExpression * expr)
 }
 
 
-void HqlGram::checkRecordIsValid(attribute &atr, IHqlExpression *record)
+void HqlGram::checkRecordIsValid(const attribute &atr, IHqlExpression *record)
 {
     if (isZeroSize(record))
         reportError(ERR_ZEROSIZE_RECORD, atr, "Record must not be zero length");
@@ -8383,6 +8428,21 @@ void HqlGram::createAppendFiles(attribute & targetAttr, attribute & leftAttr, at
     targetAttr.setPosition(leftAttr);
 }
 
+void HqlGram::createAppendDictionaries(attribute & targetAttr, attribute & leftAttr, attribute & rightAttr, _ATOM kind)
+{
+    OwnedHqlExpr left = leftAttr.getExpr();
+    OwnedHqlExpr right = rightAttr.getExpr();
+    assertex(left->isDictionary());
+    if (!right->isDictionary())
+        reportError(WRN_UNSUPPORTED_FEATURE, rightAttr, "Only dictionary may be appended to dictionary");
+    right.setown(checkEnsureRecordsMatch(left, right, rightAttr, right->isDatarow()));
+    // TODO: support for dict + row, dict + dataset
+//    if (right->isDatarow())
+//        right.setown(createDatasetFromRow(LINK(right)));
+    IHqlExpression * attr = kind ? createAttribute(kind) : NULL;
+    targetAttr.setExpr(createDictionary(no_addfiles, LINK(left), createComma(LINK(right), attr)));
+    targetAttr.setPosition(leftAttr);
+}
 
 IHqlExpression * HqlGram::processIfProduction(attribute & condAttr, attribute & trueAttr, attribute * falseAttr)
 {
@@ -9620,7 +9680,10 @@ IHqlExpression * HqlGram::resolveImportModule(const attribute & errpos, IHqlExpr
     OwnedHqlExpr resolved = parent->queryScope()->lookupSymbol(childName, LSFpublic, lookupCtx);
     if (!resolved)
     {
-        reportError(ERR_OBJ_NOSUCHFIELD, errpos, "Object '%s' does not have a field named '%s'", parent->queryName()->str(), childName->str());
+        const char * parentName = parent->queryName()->str();
+        if (!parentName)
+            parentName = "$";
+        reportError(ERR_OBJ_NOSUCHFIELD, errpos, "Object '%s' does not have a field named '%s'", parentName, childName->str());
         return NULL;
     }
     IHqlScope * ret = resolved->queryScope();
@@ -9847,6 +9910,7 @@ static void getTokenText(StringBuffer & msg, int token)
     case DENORMALIZE: msg.append("DENORMALIZE"); break;
     case DEPRECATED: msg.append("DEPRECATED"); break;
     case DESC: msg.append("DESC"); break;
+    case DICTIONARY: msg.append("DICTIONARY"); break;
     case DISTRIBUTE: msg.append("DISTRIBUTE"); break;
     case DISTRIBUTED: msg.append("DISTRIBUTED"); break;
     case DISTRIBUTION: msg.append("DISTRIBUTION"); break;
@@ -10017,7 +10081,6 @@ static void getTokenText(StringBuffer & msg, int token)
     case PARTITION: msg.append("PARTITION"); break;
     case PARTITION_ATTR: msg.append("PARTITION"); break;
     case TOK_PATTERN: msg.append("PATTERN"); break;
-    case PAYLOAD: msg.append("PAYLOAD"); break;
     case PENALTY: msg.append("PENALTY"); break;
     case PERSIST: msg.append("PERSIST"); break;
     case PHYSICALFILENAME: msg.append("PHYSICALFILENAME"); break;
@@ -10165,6 +10228,7 @@ static void getTokenText(StringBuffer & msg, int token)
 
     case DATASET_ID: msg.append("dataset"); break;
     case DATAROW_ID: msg.append("datarow"); break;
+    case DICTIONARY_ID: msg.append("dictionary"); break;
     case RECORD_ID: msg.append("record-name"); break;
     case RECORD_FUNCTION: msg.append("record-name"); break;
     case VALUE_ID: msg.append("identifier"); break;
@@ -10190,6 +10254,7 @@ static void getTokenText(StringBuffer & msg, int token)
     case SCOPE_FUNCTION: msg.append("module-name"); break;
     case TRANSFORM_FUNCTION: msg.append("transform-name"); break;
     case DATAROW_FUNCTION: msg.append("datarow"); break;
+    case DICTIONARY_FUNCTION: msg.append("dictionary"); break;
     case LIST_DATASET_FUNCTION: msg.append("identifier"); break;
 
     case VALUE_FUNCTION: 
@@ -10275,7 +10340,7 @@ void HqlGram::simplifyExpected(int *expected)
                        GROUP, GROUPED, KEYED, UNGROUP, JOIN, PULL, ROLLUP, ITERATE, PROJECT, NORMALIZE, PIPE, DENORMALIZE, CASE, MAP, 
                        HTTPCALL, SOAPCALL, LIMIT, PARSE, FAIL, MERGE, PRELOAD, ROW, TOPN, ALIAS, LOCAL, NOFOLD, NOHOIST, NOTHOR, IF, GLOBAL, __COMMON__, __COMPOUND__, TOK_ASSERT, _EMPTY_,
                        COMBINE, ROWS, REGROUP, XMLPROJECT, SKIP, LOOP, CLUSTER, NOLOCAL, REMOTE, PROCESS, ALLNODES, THISNODE, GRAPH, MERGEJOIN, STEPPED, NONEMPTY, HAVING,
-                       TOK_CATCH, '@', SECTION, WHEN, IFF, COGROUP, HINT, INDEX, PARTITION, AGGREGATE, SHUFFLE, TOK_ERROR, 0);
+                       TOK_CATCH, '@', SECTION, WHEN, IFF, COGROUP, HINT, INDEX, PARTITION, AGGREGATE, SHUFFLE, TOK_ERROR, CHOOSE, 0);
     simplify(expected, EXP, ABS, SIN, COS, TAN, SINH, COSH, TANH, ACOS, ASIN, ATAN, ATAN2, 
                        COUNT, CHOOSE, MAP, CASE, IF, HASH, HASH32, HASH64, HASHMD5, CRC, LN, TOK_LOG, POWER, RANDOM, ROUND, ROUNDUP, SQRT, 
                        TRUNCATE, LENGTH, TRIM, INTFORMAT, REALFORMAT, ASSTRING, TRANSFER, MAX, MIN, EVALUATE, SUM,
@@ -10286,7 +10351,7 @@ void HqlGram::simplifyExpected(int *expected)
                        TOXML, '@', SECTION, EVENTEXTRA, EVENTNAME, __SEQUENCE__, IFF, OMITTED, GETENV, __DEBUG__, __STAND_ALONE__, 0);
     simplify(expected, DATA_CONST, REAL_CONST, STRING_CONST, INTEGER_CONST, UNICODE_CONST, 0);
     simplify(expected, VALUE_MACRO, DEFINITIONS_MACRO, 0);
-    simplify(expected, VALUE_ID, DATASET_ID, RECORD_ID, ACTION_ID, UNKNOWN_ID, SCOPE_ID, VALUE_FUNCTION, DATAROW_FUNCTION, DATASET_FUNCTION, LIST_DATASET_FUNCTION, LIST_DATASET_ID, ALIEN_ID, TYPE_ID, SET_TYPE_ID, TRANSFORM_ID, TRANSFORM_FUNCTION, RECORD_FUNCTION, FEATURE_ID, EVENT_ID, EVENT_FUNCTION, SCOPE_FUNCTION, ENUM_ID, PATTERN_TYPE_ID, 0); 
+    simplify(expected, VALUE_ID, DATASET_ID, DICTIONARY_ID, RECORD_ID, ACTION_ID, UNKNOWN_ID, SCOPE_ID, VALUE_FUNCTION, DATAROW_FUNCTION, DATASET_FUNCTION, DICTIONARY_FUNCTION, LIST_DATASET_FUNCTION, LIST_DATASET_ID, ALIEN_ID, TYPE_ID, SET_TYPE_ID, TRANSFORM_ID, TRANSFORM_FUNCTION, RECORD_FUNCTION, FEATURE_ID, EVENT_ID, EVENT_FUNCTION, SCOPE_FUNCTION, ENUM_ID, PATTERN_TYPE_ID, 0);
     simplify(expected, LIBRARY, LIBRARY, SCOPE_FUNCTION, STORED, PROJECT, INTERFACE, MODULE, 0);
     simplify(expected, MATCHROW, MATCHROW, LEFT, RIGHT, IF, IFF, ROW, HTTPCALL, SOAPCALL, PROJECT, GLOBAL, NOFOLD, NOHOIST, ALLNODES, THISNODE, SKIP, DATAROW_FUNCTION, TRANSFER, RIGHT_NN, FROMXML, 0);
     simplify(expected, TRANSFORM_ID, TRANSFORM_FUNCTION, TRANSFORM, '@', 0);
@@ -10334,6 +10399,7 @@ void HqlGram::syntaxError(const char *s, int token, int *expected)
     {
     case DATAROW_ID:
     case DATASET_ID:
+    case DICTIONARY_ID:
     case SCOPE_ID:
     case VALUE_ID:
     case VALUE_ID_REF:
@@ -10352,6 +10418,7 @@ void HqlGram::syntaxError(const char *s, int token, int *expected)
     case LIST_DATASET_ID:
     case DATAROW_FUNCTION:
     case DATASET_FUNCTION:
+    case DICTIONARY_FUNCTION:
     case VALUE_FUNCTION:
     case ACTION_FUNCTION:
     case PATTERN_FUNCTION:
@@ -11091,6 +11158,13 @@ void parseAttribute(IHqlScope * scope, IFileContents * contents, HqlLookupContex
 
 void testHqlInternals()
 {
+    printf("Sizes: const(%u) expr(%u) select(%u) dataset(%u) annotation(%u)\n",
+            (unsigned)sizeof(CHqlConstant),
+            (unsigned)sizeof(CHqlExpressionWithType),
+            (unsigned)sizeof(CHqlSelectExpression),
+            (unsigned)sizeof(CHqlDataset),
+            (unsigned)sizeof(CHqlAnnotation));
+
     //
     // test getOpString()
     int error = 0,i;

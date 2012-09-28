@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #ifndef WORKUNIT_INCL
@@ -314,6 +313,7 @@ interface IWUResult : extends IConstWUResult
     virtual void setResultIsAll(bool value) = 0;
     virtual void setResultFormat(WUResultFormat format) = 0;
     virtual void setResultXML(const char * xml) = 0;
+    virtual void setResultRow(unsigned len, const void * data) = 0;
 };
 
 
@@ -548,7 +548,6 @@ interface IConstWUClusterInfo : extends IInterface
     virtual ClusterType getPlatform() const = 0;
     virtual IStringVal & getAgentQueue(IStringVal & str) const = 0;
     virtual IStringVal & getServerQueue(IStringVal & str) const = 0;
-    virtual IStringVal & getQuerySetName(IStringVal & str) const = 0;
     virtual IStringVal & getRoxieProcess(IStringVal & str) const = 0;
     virtual const StringArray & getThorProcesses() const = 0;
     virtual const SocketEndpointArray & getRoxieServers() const = 0;
@@ -1141,6 +1140,7 @@ extern WORKUNIT_API IStringVal &getAgentQueueNames(IStringVal &ret, const char *
 extern WORKUNIT_API IStringVal &getRoxieQueueNames(IStringVal &ret, const char *process);
 extern WORKUNIT_API IStringVal &getThorQueueNames(IStringVal &ret, const char *process);
 extern WORKUNIT_API StringBuffer &getClusterThorQueueName(StringBuffer &ret, const char *cluster);
+extern WORKUNIT_API StringBuffer &getClusterThorGroupName(StringBuffer &ret, const char *cluster);
 extern WORKUNIT_API StringBuffer &getClusterRoxieQueueName(StringBuffer &ret, const char *cluster);
 extern WORKUNIT_API StringBuffer &getClusterEclCCServerQueueName(StringBuffer &ret, const char *cluster);
 extern WORKUNIT_API StringBuffer &getClusterEclServerQueueName(StringBuffer &ret, const char *cluster);
@@ -1150,6 +1150,8 @@ extern WORKUNIT_API bool validateTargetClusterName(const char *clustname);
 extern WORKUNIT_API IConstWUClusterInfo* getTargetClusterInfo(const char *clustname);
 typedef IArrayOf<IConstWUClusterInfo> CConstWUClusterInfoArray;
 extern WORKUNIT_API unsigned getEnvironmentClusterInfo(CConstWUClusterInfoArray &clusters);
+extern WORKUNIT_API void getRoxieProcessServers(const char *process, SocketEndpointArray &servers);
+
 
 extern WORKUNIT_API bool getWorkUnitCreateTime(const char *wuid,CDateTime &time); // based on WUID
 extern WORKUNIT_API bool restoreWorkUnit(const char *base,const char *wuid);
@@ -1205,17 +1207,21 @@ enum WUQueryActivationOptions
 };
 
 
-extern WORKUNIT_API IPropertyTree * addNamedQuery(IPropertyTree * queryRegistry, const char * name, const char * wuid, const char * dll);       // result not linked
+extern WORKUNIT_API IPropertyTree * addNamedQuery(IPropertyTree * queryRegistry, const char * name, const char * wuid, const char * dll, bool library);       // result not linked
 extern WORKUNIT_API void removeNamedQuery(IPropertyTree * queryRegistry, const char * id);
 extern WORKUNIT_API void removeWuidFromNamedQueries(IPropertyTree * queryRegistry, const char * wuid);
 extern WORKUNIT_API void removeDllFromNamedQueries(IPropertyTree * queryRegistry, const char * dll);
 extern WORKUNIT_API void removeAliasesFromNamedQuery(IPropertyTree * queryRegistry, const char * id);
 extern WORKUNIT_API void setQueryAlias(IPropertyTree * queryRegistry, const char * name, const char * value);
+
+extern WORKUNIT_API IPropertyTree * getQueryById(IPropertyTree * queryRegistry, const char *queryid);
+extern WORKUNIT_API IPropertyTree * getQueryById(const char *queryset, const char *queryid, bool readonly);
 extern WORKUNIT_API IPropertyTree * resolveQueryAlias(IPropertyTree * queryRegistry, const char * alias);
+extern WORKUNIT_API IPropertyTree * resolveQueryAlias(const char *queryset, const char *alias, bool readonly);
 extern WORKUNIT_API IPropertyTree * getQueryRegistry(const char * wsEclId, bool readonly);
 extern WORKUNIT_API IPropertyTree * getQueryRegistryRoot();
+
 extern WORKUNIT_API void setQueryCommentForNamedQuery(IPropertyTree * queryRegistry, const char *id, const char *queryComment);
-extern WORKUNIT_API StringArray &getQuerySetTargetClusters(const char *queryset, StringArray &clusters);
 
 extern WORKUNIT_API void setQuerySuspendedState(IPropertyTree * queryRegistry, const char * name, bool suspend);
 
@@ -1237,7 +1243,7 @@ extern WORKUNIT_API void associateLocalFile(IWUQuery * query, WUFileType type, c
 
 
 extern WORKUNIT_API const char *getTargetClusterComponentName(const char *clustname, const char *processType, StringBuffer &name);
-
+extern WORKUNIT_API void descheduleWorkunit(char const * wuid);
 #if 0
 void WORKUNIT_API testWorkflow();
 #endif

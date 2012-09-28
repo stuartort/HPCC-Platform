@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 #include <stdio.h>
 #include "jlog.hpp"
@@ -94,6 +93,12 @@ public:
     }
     virtual bool parseCommandLineOptions(ArgvIterator &iter)
     {
+        if (iter.done())
+        {
+            usage();
+            return false;
+        }
+
         for (; !iter.done(); iter.next())
         {
             const char *arg = iter.query();
@@ -102,7 +107,9 @@ public:
                 optQuerySet.set(arg);
                 continue;
             }
-            if (iter.matchOption(optCluster, ECLOPT_CLUSTER) || iter.matchOption(optCluster, ECLOPT_CLUSTER_S))
+            if (iter.matchOption(optTargetCluster, ECLOPT_CLUSTER_DEPRECATED)||iter.matchOption(optTargetCluster, ECLOPT_CLUSTER_DEPRECATED_S))
+                continue;
+            if (iter.matchOption(optTargetCluster, ECLOPT_TARGET)||iter.matchOption(optTargetCluster, ECLOPT_TARGET_S))
                 continue;
             StringAttr temp;
             if (iter.matchOption(temp, ECLOPT_SHOW))
@@ -173,20 +180,23 @@ public:
         line.append(query.getSuspended() ? 'S' : ' ');
         line.append(isActive ? 'A' : ' ');
         line.append(' ').append(queryid);
-        if (isActive)
+        if (!query.getTimeLimit_isNull())
         {
-            Owned<IPropertyTreeIterator> activeNames = queryMap.getActiveNames(queryid);
-            if (line.length() < 35)
-                line.appendN(35 - line.length(), ' ');
-            line.append("[");
-            activeNames->first();
-            while (activeNames->isValid())
-            {
-                line.append(activeNames->query().queryProp(NULL));
-                if (activeNames->next())
-                    line.append(',');
-            }
-            line.append("]");
+            if (line.length() < 34)
+                line.appendN(34 - line.length(), ' ');
+            line.append(' ').append(query.getTimeLimit());
+        }
+        if (!query.getWarnTimeLimit_isNull())
+        {
+            if (line.length() < 41)
+                line.appendN(41 - line.length(), ' ');
+            line.append(' ').append(query.getWarnTimeLimit());
+        }
+        if (query.getMemoryLimit())
+        {
+            if (line.length() < 48)
+                line.appendN(48 - line.length(), ' ');
+            line.append(' ').append(query.getMemoryLimit());
         }
         fputs(line.append('\n').str(), stdout);
     }
@@ -196,8 +206,10 @@ public:
         ActiveQueryMap queryMap(qs);
         if (qs.getQuerySetName())
             fprintf(stdout, "\nQuerySet: %s\n", qs.getQuerySetName());
-        fputs("\nFlags Query Id                     [Active Name(s)]\n", stdout);
-        fputs("----- ---------------------------- ----------------\n", stdout);
+        fputs("\n", stdout);
+        fputs("                                   Time   Warn   Memory\n", stdout);
+        fputs("Flags Query Id                     Limit  Limit  Limit\n", stdout);
+        fputs("----- ---------------------------- ------ ------ ----------\n", stdout);
 
         IArrayOf<IConstQuerySetQuery> &queries = qs.getQueries();
         ForEachItemIn(id, queries)
@@ -214,7 +226,7 @@ public:
 
         Owned<IClientWUMultiQuerySetDetailsRequest> req = client->createWUMultiQuerysetDetailsRequest();
         req->setQuerySetName(optQuerySet.get());
-        req->setClusterName(optCluster.get());
+        req->setClusterName(optTargetCluster.get());
         req->setFilterType("All");
 
         Owned<IClientWUMultiQuerySetDetailsResponse> resp = client->WUMultiQuerysetDetails(req);
@@ -237,10 +249,10 @@ public:
             "cluster will be shown. If no queryset or cluster is specified all querysets\n"
             "are shown.\n"
             "\n"
-            "ecl queries list [<queryset>][--cluster=<cluster>][--show=<flags>]\n\n"
+            "ecl queries list [<queryset>][--target=<val>][--show=<flags>]\n\n"
             " Options:\n"
             "   <queryset>             name of queryset to get list of queries for\n"
-            "   -cl, --cluster=<name>  name of cluster to get list of published queries for\n"
+            "   -t, --target=<val>     target cluster to get list of published queries for\n"
             "   --show=<flags>         show only queries with matching flags\n"
             " Flags:\n"
             "   A                      query is active\n"
@@ -252,7 +264,7 @@ public:
         EclCmdCommon::usage();
     }
 private:
-    StringAttr optCluster;
+    StringAttr optTargetCluster;
     StringAttr optQuerySet;
     unsigned flags;
 };
@@ -260,11 +272,19 @@ private:
 class EclCmdQueriesCopy : public EclCmdCommon
 {
 public:
-    EclCmdQueriesCopy() : optActivate(false), optMsToWait(10000)
+    EclCmdQueriesCopy() : optActivate(false), optNoReload(false), optMsToWait(10000), optDontCopyFiles(false), optOverwrite(false)
     {
+        optTimeLimit = (unsigned) -1;
+        optWarnTimeLimit = (unsigned) -1;
     }
     virtual bool parseCommandLineOptions(ArgvIterator &iter)
     {
+        if (iter.done())
+        {
+            usage();
+            return false;
+        }
+
         for (; !iter.done(); iter.next())
         {
             const char *arg = iter.query();
@@ -281,11 +301,25 @@ public:
                 }
                 continue;
             }
+            if (iter.matchOption(optDaliIP, ECLOPT_DALIIP))
+                continue;
             if (iter.matchFlag(optActivate, ECLOPT_ACTIVATE)||iter.matchFlag(optActivate, ECLOPT_ACTIVATE_S))
                 continue;
-            if (iter.matchOption(optCluster, ECLOPT_CLUSTER)||iter.matchOption(optCluster, ECLOPT_CLUSTER_S))
+            if (iter.matchFlag(optNoReload, ECLOPT_NORELOAD))
+                continue;
+            if (iter.matchOption(optTargetCluster, ECLOPT_CLUSTER_DEPRECATED)||iter.matchOption(optTargetCluster, ECLOPT_CLUSTER_DEPRECATED_S))
+                continue;
+            if (iter.matchOption(optTargetCluster, ECLOPT_TARGET)||iter.matchOption(optTargetCluster, ECLOPT_TARGET_S))
+                continue;
+            if (iter.matchFlag(optDontCopyFiles, ECLOPT_DONT_COPY_FILES))
                 continue;
             if (iter.matchOption(optMsToWait, ECLOPT_WAIT))
+                continue;
+            if (iter.matchOption(optTimeLimit, ECLOPT_TIME_LIMIT))
+                continue;
+            if (iter.matchOption(optWarnTimeLimit, ECLOPT_WARN_TIME_LIMIT))
+                continue;
+            if (iter.matchOption(optMemoryLimit, ECLOPT_MEMORY_LIMIT))
                 continue;
             if (EclCmdCommon::matchCommandLineOption(iter, true)!=EclCmdOptionMatch)
                 return false;
@@ -301,11 +335,17 @@ public:
             fputs("source and target must both be specified.\n\n", stderr);
             return false;
         }
-        if (optSourceQueryPath.get()[0]=='/' && optSourceQueryPath.get()[1]=='/' && optCluster.isEmpty())
+        if (optSourceQueryPath.get()[0]=='/' && optSourceQueryPath.get()[1]=='/' && optTargetCluster.isEmpty())
         {
             fputs("cluster must be specified for remote copies.\n\n", stderr);
             return false;
         }
+        if (optMemoryLimit.length() && !isValidMemoryValue(optMemoryLimit))
+        {
+            fprintf(stderr, "invalid --memoryLimit value of %s.\n\n", optMemoryLimit.get());
+            return false;
+        }
+
         return true;
     }
 
@@ -320,9 +360,20 @@ public:
         Owned<IClientWUQuerySetCopyQueryRequest> req = client->createWUQuerysetCopyQueryRequest();
         req->setSource(optSourceQueryPath.get());
         req->setTarget(optTargetQuerySet.get());
-        req->setCluster(optCluster.get());
+        req->setCluster(optTargetCluster.get());
+        req->setDaliServer(optDaliIP.get());
         req->setActivate(optActivate);
+        req->setOverwrite(optOverwrite);
+        req->setDontCopyFiles(optDontCopyFiles);
         req->setWait(optMsToWait);
+        req->setNoReload(optNoReload);
+
+        if (optTimeLimit != (unsigned) -1)
+            req->setTimeLimit(optTimeLimit);
+        if (optWarnTimeLimit != (unsigned) -1)
+            req->setWarnTimeLimit(optWarnTimeLimit);
+        if (!optMemoryLimit.isEmpty())
+            req->setMemoryLimit(optMemoryLimit);
 
         Owned<IClientWUQuerySetCopyQueryResponse> resp = client->WUQuerysetCopyQuery(req);
         if (resp->getExceptions().ordinality())
@@ -351,9 +402,17 @@ public:
             "                          in the form: //ip:port/queryset/query\n"
             "                          or: queryset/query\n"
             "   <target_queryset>      name of queryset to copy the query into\n"
-            "   -cl, --cluster=<name>  Local cluster to associate with remote workunit\n"
+            "   -t, --target=<val>     Local target cluster to associate with remote workunit\n"
+            "   --no-files             Do not copy files referenced by query\n"
+            "   --daliip=<ip>          For file copying if remote version < 3.8\n"
             "   -A, --activate         Activate the new query\n"
+            "   --no-reload            Do not request a reload of the (roxie) cluster\n"
+            "   -O, --overwrite        Overwrite existing files\n"
             "   --wait=<ms>            Max time to wait in milliseconds\n"
+            "   --timeLimit=<sec>      Value to set for query timeLimit configuration\n"
+            "   --warnTimeLimit=<sec>  Value to set for query warnTimeLimit configuration\n"
+            "   --memoryLimit=<mem>    Value to set for query memoryLimit configuration\n"
+            "                          format <mem> as 500000B, 550K, 100M, 10G, 1T etc.\n"
             " Common Options:\n",
             stdout);
         EclCmdCommon::usage();
@@ -361,9 +420,144 @@ public:
 private:
     StringAttr optSourceQueryPath;
     StringAttr optTargetQuerySet;
-    StringAttr optCluster;
+    StringAttr optTargetCluster;
+    StringAttr optDaliIP;
+    StringAttr optMemoryLimit;
     unsigned optMsToWait;
+    unsigned optTimeLimit;
+    unsigned optWarnTimeLimit;
     bool optActivate;
+    bool optNoReload;
+    bool optOverwrite;
+    bool optDontCopyFiles;
+};
+
+class EclCmdQueriesConfig : public EclCmdCommon
+{
+public:
+    EclCmdQueriesConfig() : optNoReload(false), optMsToWait(10000)
+    {
+        optTimeLimit = (unsigned) -1;
+        optWarnTimeLimit = (unsigned) -1;
+    }
+    virtual bool parseCommandLineOptions(ArgvIterator &iter)
+    {
+        if (iter.done())
+        {
+            usage();
+            return false;
+        }
+
+        for (; !iter.done(); iter.next())
+        {
+            const char *arg = iter.query();
+            if (*arg!='-')
+            {
+                if (optTargetCluster.isEmpty())
+                    optTargetCluster.set(arg);
+                else if (optQueryId.isEmpty())
+                    optQueryId.set(arg);
+                else
+                {
+                    fprintf(stderr, "\nunrecognized argument %s\n", arg);
+                    return false;
+                }
+                continue;
+            }
+            if (iter.matchFlag(optNoReload, ECLOPT_NORELOAD))
+                continue;
+            if (iter.matchOption(optMsToWait, ECLOPT_WAIT))
+                continue;
+            if (iter.matchOption(optTimeLimit, ECLOPT_TIME_LIMIT))
+                continue;
+            if (iter.matchOption(optWarnTimeLimit, ECLOPT_WARN_TIME_LIMIT))
+                continue;
+            if (iter.matchOption(optMemoryLimit, ECLOPT_MEMORY_LIMIT))
+                continue;
+            if (EclCmdCommon::matchCommandLineOption(iter, true)!=EclCmdOptionMatch)
+                return false;
+        }
+        return true;
+    }
+    virtual bool finalizeOptions(IProperties *globals)
+    {
+        if (!EclCmdCommon::finalizeOptions(globals))
+            return false;
+        if (optTargetCluster.isEmpty() || optQueryId.isEmpty())
+        {
+            fputs("Target and QueryId must both be specified.\n\n", stderr);
+            return false;
+        }
+        if (optMemoryLimit.length() && !isValidMemoryValue(optMemoryLimit))
+        {
+            fprintf(stderr, "invalid --memoryLimit value of %s.\n\n", optMemoryLimit.get());
+            return false;
+        }
+        return true;
+    }
+
+    virtual int processCMD()
+    {
+        Owned<IClientWsWorkunits> client = createWsWorkunitsClient();
+        VStringBuffer url("http://%s:%s/WsWorkunits", optServer.sget(), optPort.sget());
+        client->addServiceUrl(url.str());
+        if (optUsername.length())
+            client->setUsernameToken(optUsername.get(), optPassword.sget(), NULL);
+
+        Owned<IClientWUQueryConfigRequest> req = client->createWUQueryConfigRequest();
+        req->setTarget(optTargetCluster.get());
+        req->setQueryId(optQueryId.get());
+        req->setWait(optMsToWait);
+        req->setNoReload(optNoReload);
+
+        if (optTimeLimit != (unsigned) -1)
+            req->setTimeLimit(optTimeLimit);
+        if (optWarnTimeLimit != (unsigned) -1)
+            req->setWarnTimeLimit(optWarnTimeLimit);
+        if (!optMemoryLimit.isEmpty())
+            req->setMemoryLimit(optMemoryLimit);
+
+        Owned<IClientWUQueryConfigResponse> resp = client->WUQueryConfig(req);
+        if (resp->getExceptions().ordinality())
+            outputMultiExceptions(resp->getExceptions());
+        IArrayOf<IConstWUQueryConfigResult> &results = resp->getResults();
+        if (results.length())
+        {
+            fputs("configured:\n", stdout);
+            ForEachItemIn(i, results)
+                fprintf(stdout, "   %s\n", results.item(i).getQueryId());
+        }
+        return 0;
+    }
+    virtual void usage()
+    {
+        fputs("\nUsage:\n"
+            "\n"
+            "The 'queries config' command updates query configuration values.\n"
+            "\n"
+            "ecl queries config <target> <queryid> [options]\n"
+            "\n"
+            " Options:\n"
+            "   <target>               Name of target queryset containing query\n"
+            "   <queryid>              Id of the query to configure\n"
+            "   --no-reload            Do not request a reload of the (roxie) cluster\n"
+            "   --wait=<ms>            Max time to wait in milliseconds\n"
+            "   --timeLimit=<sec>      Value to set for query timeLimit configuration\n"
+            "   --warnTimeLimit=<sec>  Value to set for query warnTimeLimit configuration\n"
+            "   --memoryLimit=<mem>    Value to set for query memoryLimit configuration\n"
+            "                          format <mem> as 500000B, 550K, 100M, 10G, 1T etc.\n"
+            " Common Options:\n",
+            stdout);
+        EclCmdCommon::usage();
+    }
+private:
+    StringAttr optTargetCluster;
+    StringAttr optQueryId;
+    StringAttr optMemoryLimit;
+    unsigned optMsToWait;
+    unsigned optTimeLimit;
+    unsigned optWarnTimeLimit;
+    bool optNoReload;
 };
 
 IEclCommand *createEclQueriesCommand(const char *cmdname)
@@ -372,6 +566,8 @@ IEclCommand *createEclQueriesCommand(const char *cmdname)
         return NULL;
     if (strieq(cmdname, "list"))
         return new EclCmdQueriesList();
+    if (strieq(cmdname, "config"))
+        return new EclCmdQueriesConfig();
     if (strieq(cmdname, "copy"))
         return new EclCmdQueriesCopy();
     return NULL;
@@ -393,6 +589,7 @@ public:
             "ecl queries <command> [command options]\n\n"
             "   Queries Commands:\n"
             "      list         list queries in queryset(s)\n"
+            "      config       update query settings\n"
             "      copy         copy a query from one queryset to another\n"
         );
     }

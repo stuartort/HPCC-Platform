@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #define da_decl __declspec(dllexport)
@@ -508,6 +507,16 @@ public:
                 StringAttr passwordenc;
                 mb.read(key).read(obj);
                 udesc->deserialize(mb);
+#ifdef _DALIUSER_STACKTRACE
+                //following debug code to be removed
+                StringBuffer sb;
+                udesc->getUserName(sb);
+                if (0==sb.length() || !stricmp(sb.str(), "daliuser"))
+                {
+                    DBGLOG("UNEXPECTED USER '%s' in dasess.cpp line %d",username.get(), __LINE__);
+                    PrintStackReport();
+                }
+#endif
                 unsigned auditflags = 0;
                 if (mb.length()-mb.getPos()>=sizeof(auditflags))
                     mb.read(auditflags);
@@ -761,6 +770,17 @@ public:
         CMessageBuffer mb;
         mb.append((int)MSR_LOOKUP_LDAP_PERMISSIONS);
         mb.append(key).append(obj);
+#ifdef _DALIUSER_STACKTRACE
+        //following debug code to be removed
+        StringBuffer sb;
+        if (udesc)
+            udesc->getUserName(sb);
+        if (0==sb.length() || !stricmp(sb.str(), "daliuser"))
+        {
+            DBGLOG("UNEXPECTED USER '%s' in dasess.cpp line %d",sb.str(),__LINE__);
+            PrintStackReport();
+        }
+#endif
         udesc->serialize(mb);
         mb.append(auditflags);
         if (!queryCoven().sendRecv(mb,RANK_RANDOM,MPTAG_DALI_SESSION_REQUEST,SESSIONREPLYTIMEOUT))
@@ -1515,6 +1535,7 @@ void setClientAuth(IDaliClientAuthConnection *authconn)
 
 
 
+#define REG_SLEEP 5000
 bool registerClientProcess(ICommunicator *comm, IGroup *& retcoven,unsigned timeout,DaliClientRole role)
 {
     // NB doesn't use coven as not yet set up
@@ -1522,7 +1543,8 @@ bool registerClientProcess(ICommunicator *comm, IGroup *& retcoven,unsigned time
         return false;
     CTimeMon tm(timeout);
     retcoven = NULL;
-    unsigned t=5000;
+    unsigned nextLog = 0, lastNextLog = 0;
+    unsigned t=REG_SLEEP;
     unsigned remaining;
     rank_t r;
     while (!tm.timedout(&remaining)) {
@@ -1592,13 +1614,25 @@ bool registerClientProcess(ICommunicator *comm, IGroup *& retcoven,unsigned time
                 return true;
             }
         }
-        bool timedout = tm.timedout();
         StringBuffer str;
-        PROGLOG("Failed to connect to Dali Server %s%s",comm->queryGroup().queryNode(r).endpoint().getUrlStr(str).str(),timedout?"":". Retrying...");
-        if (timedout)
+        PROGLOG("Failed to connect to Dali Server %s.", comm->queryGroup().queryNode(r).endpoint().getUrlStr(str).str());
+        if (tm.timedout())
+        {
+            PROGLOG("%s", str.append(" Timed out.").str());
             break;
-        Sleep(t);
-        t *= 2;
+        }
+        else if (0 == nextLog)
+        {
+            PROGLOG("%s", str.append(" Retrying...").str());
+            if ((lastNextLog * REG_SLEEP) >= 60000) // limit to a minute between logging
+                nextLog = 60000 / REG_SLEEP;
+            else
+                nextLog = lastNextLog + 2; // wait +2 REG_SLEEP pauses before next logging
+            lastNextLog = nextLog;
+        }
+        else
+            --nextLog;
+        Sleep(REG_SLEEP);
     }
     return false;
 }

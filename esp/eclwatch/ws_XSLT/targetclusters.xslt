@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 -->
 <!DOCTYPE xsl:stylesheet [
   <!--uncomment these for production-->
@@ -105,13 +104,14 @@
 
           function onLoad()
           {
+            document.getElementsByName('TargetClusters.itemcount')[0].value = countTCs;
             initSelection('resultsTable');
 
             if (countTCs > 0)
             {
               for (i=0; i<countTCs; i++)
               { 
-                var ch = document.getElementById('TargetClusters_i'+i);
+                var ch = document.getElementById('TargetClusters.'+i);
                 if (ch && ch.checked)
                 {
                   clusterChecked++;
@@ -229,11 +229,12 @@
             <body class="yui-skin-sam" onload="nof5();onLoad();">
                 <h3>Target Clusters:</h3>
                 <form id="listitems" action="/ws_machine/GetTargetClusterInfo" method="post">
-          <xsl:for-each select="TpTargetClusters/TpTargetCluster">
-                         <xsl:call-template name="show-cluster">
-                              <xsl:with-param name="type" select="Type"/>
-                <xsl:with-param name="name" select="Name"/>
-             </xsl:call-template>
+                    <input type="hidden" name="TargetClusters.itemcount" value=""/>
+                    <xsl:for-each select="TpTargetClusters/TpTargetCluster">
+                        <xsl:call-template name="show-cluster">
+                            <xsl:with-param name="type" select="Type"/>
+                            <xsl:with-param name="name" select="Name"/>
+                        </xsl:call-template>
                     </xsl:for-each>
           <xsl:call-template name="ShowPreflightControls">
             <xsl:with-param name="method" select="'GetMachineInfo'"/>
@@ -264,7 +265,7 @@
         <table id="resultsTable" class="sort-table" width="100%">
             <tr class="grey">
                 <td valign="top" width="20">
-          <input type="checkbox" id="TargetClusters_i{count(preceding::TpTargetCluster)}" name="TargetClusters_i{count(preceding::TpTargetCluster)}"
+          <input type="checkbox" id="TargetClusters.{count(preceding::TpTargetCluster)}" name="TargetClusters.{count(preceding::TpTargetCluster)}"
                                 value="{$type}:{$name}" title="Select this target cluster" onclick="return clickTCCheckbox('{$type}', '{$name}', this);"></input>
         </td>
         <td align="left" width="20">

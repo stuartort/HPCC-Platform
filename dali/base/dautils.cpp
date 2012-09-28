@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #define da_decl __declspec(dllexport)
@@ -52,6 +51,7 @@ extern da_decl const char *queryDfsXmlBranchName(DfsXmlBranchKind kind)
     case DXB_SuperFile:     return "SuperFile";
     case DXB_Collection:    return "Collection";
     case DXB_Scope:         return "Scope";
+    case DXB_Internal:      return "HpccInternal";
     }
     assertex(!"unknown DFS XML branch name");
     return "UNKNOWN";
@@ -130,7 +130,7 @@ public:
         delete [] dlfns;
     }
 
-    static CMultiDLFN *create(const char *_mlfn)
+    static CMultiDLFN *create(const char *_mlfn, IUserDescriptor *_udesc)
     {
         StringBuffer mlfn(_mlfn);
         mlfn.trim();
@@ -146,7 +146,7 @@ public:
             return NULL;
         mlfn.setLength(start-s);
         StringArray lfns;
-        CslToStringArray(start+1, lfns);
+        lfns.appendList(start+1, ",");
         bool anywilds = false;
         ForEachItemIn(i1,lfns) {
             const char *suffix = lfns.item(i1);
@@ -167,7 +167,7 @@ public:
                     else
                         tmp.append(mlfn).append(suffix);
                     tmp.clip().toLowerCase();
-                    Owned<IDFAttributesIterator> iter=queryDistributedFileDirectory().getDFAttributesIterator(tmp.str(),false,true);
+                    Owned<IDFAttributesIterator> iter=queryDistributedFileDirectory().getDFAttributesIterator(tmp.str(),false,true,NULL,_udesc);
                     mlfn.setLength(start-s);
                     ForEach(*iter) {
                         IPropertyTree &attr = iter->query();
@@ -191,6 +191,9 @@ public:
             ForEachItemIn(i3,lfnout) {
                 lfns.append(lfnout.item(i3));
             }
+            // if wildcards, create object even if 0 matches,
+            // if 0 matches, the logical file will look like an empty temp. super "{}"
+            return new CMultiDLFN(mlfn.str(),lfns);
         }
         if (lfns.ordinality()==0)
             return NULL;
@@ -220,6 +223,7 @@ CDfsLogicalFileName::CDfsLogicalFileName()
 {
     allowospath = false;
     multi = NULL;
+    udesc = NULL;
     clear();
 }
 
@@ -280,7 +284,7 @@ void CDfsLogicalFileName::set(const char *name)
         return;
     skipSp(name);
     try {
-        multi = CMultiDLFN::create(name);
+        multi = CMultiDLFN::create(name,udesc);
     }
     catch (IException *e) {
         StringBuffer err;
@@ -2698,6 +2702,7 @@ public:
 
     bool init(const char *fname,IUserDescriptor *user,bool onlylocal,bool onlydfs, bool write)
     {
+        lfn.setUserDescriptor(user);
         fileExists = false;
         if (!onlydfs)
             lfn.allowOsPath(true);

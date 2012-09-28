@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 -->
 
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
@@ -63,30 +62,133 @@
             var Jobname = '<xsl:value-of select="$jobName"/>';
 
           <xsl:text disable-output-escaping="yes"><![CDATA[
-           var url0 = '';
-           var reloadTimer = null;
-                     var reloadTimeout = 0;
-           var sections = new Array("Exceptions","Graphs","SourceFiles","Results","Variables","Timers","DebugValues","ApplicationValues","Workflows");
-           var activeSections = new Array();
+            var url0 = '';
+            var reloadTimer = null;
+            var reloadTimeout = 0;
+            var sections = new Array("Exceptions","Graphs","SourceFiles","Results","Variables","Timers","DebugValues","ApplicationValues","Workflows");
+            var activeSections = new Array();
+            var thorProcess;
+            var thorGroup;
+            var thorLogDate;
+            var numberOfSlaves;
          
-                     // This function gets called when the window has completely loaded.
-                     // It starts the reload timer with a default time value.
+            function CheckSlaveLogInput(e, allows)
+            {
+                var key, keychar;
+                if (window.event)
+                {
+                    key = window.event.keyCode;
+                    keychar = String.fromCharCode(key);
+                }
+                else if (e)
+                {
+                    key = e.keyCode;
+                    keychar = String.fromCharCode(e.which);
+                }
+                else
+                   return true;
 
-     function onLoad()
-     {
-        /*
-        initialize();
-            
-          if (isarchived)
-        {
-          return;
-        }
-        UpdateAutoRefresh();
-        //reloadSection('Exceptions');
-        checkPreloadedSections();
-        */
-        return;
-     } 
+                if (key == 13) //for 'enter' key
+                {
+                    GetThorSlaveLog();
+                    return true;
+                }
+
+                if (key ==  8 || key == 37 || key == 39) //8/37/39: backspace/left/right
+                   return true;
+
+                if (((allows).indexOf(keychar) > -1))
+                   return true;
+                else
+                   return false;
+            }
+
+            function CheckSlaveNum(e)
+            {
+                if (document.getElementById('NumberSlaves').disabled == 'true')
+                    return false;
+
+                return CheckSlaveLogInput(e, '0123456789');
+            }
+
+            function CheckSlaveAddress(e)
+            {
+                if (document.getElementById('SlaveAddress').disabled == 'true')
+                    return false;
+
+                return CheckSlaveLogInput(e, '0123456789_.');
+            }
+
+            function thorProcessChanged(value)
+            {
+                pos = value.indexOf('@');
+                thorLogDate = value.substring(pos+1);
+                numberOfSlaves = parseInt(value.substring(0, pos));
+                pos1 = thorLogDate.indexOf('@');
+                thorProcess = thorLogDate.substring(pos1+1);
+                thorLogDate = thorLogDate.substring(0, pos1);
+                pos2 = thorProcess.indexOf('@');
+                thorGroup = thorProcess.substring(pos2+1);
+                thorProcess = thorProcess.substring(0, pos2);
+
+                var el = document.getElementById('NumberSlaves');
+                if (el == undefined)
+                    return;
+
+                if (numberOfSlaves == 1)
+                {
+                    el.innerText = '';
+                    document.getElementById('SlaveNum').disabled=true;
+                }
+                else
+                {
+                    el.innerText = ' (from 1 to ' + numberOfSlaves + ')';
+                    document.getElementById('SlaveNum').disabled = false;
+                }
+                document.getElementById('SlaveNum').value = '1';
+            }
+
+            function GetThorSlaveLog()
+            {
+                if (document.getElementById('NumberSlaves') != undefined)
+                {
+                    var slaveNum = parseInt(document.getElementById('SlaveNum').value);
+                    if (slaveNum > numberOfSlaves)
+                    {
+                        alert('Slave Number cannot be greater than ' + numberOfSlaves);
+                        return;
+                    }
+
+                    getOptions('ThorSlave.log', '/WsWorkunits/WUFile?Wuid='+wid+'&Type=ThorSlaveLog&Process='
+                    +thorProcess+'&ClusterGroup='+thorGroup+'&LogDate='+thorLogDate+'&SlaveNumber='+slaveNum, true);
+                }
+                else
+                {
+                    var el = document.getElementById('SlaveAddress');
+                    if (el.value == '')
+                    {
+                        alert('Slave address not specified');
+                        return;
+                    }
+
+                    getOptions('ThorSlave.log', '/WsWorkunits/WUFile?Wuid='+wid+'&Type=ThorSlaveLog&SlaveNumber=0&Process='
+                    +document.getElementById('ProcessName').value+'&IPAddress='+el.value+'&LogDate='
+                    +document.getElementById('LogDate').value, true);
+                }
+            }
+
+            // This function gets called when the window has completely loaded.
+            // It starts the reload timer with a default time value.
+            function onLoad()
+            {
+                var thorProcessDropDown = document.getElementById('ThorProcess');
+                if (thorProcessDropDown == undefined)
+                    return;
+
+                thorProcessChanged(thorProcessDropDown.options[thorProcessDropDown.selectedIndex].value);
+
+                return;
+            }
 
    function onUnload()
    {
@@ -273,12 +375,6 @@
                             logBtn.disabled = false;
                         else
                             logBtn.disabled = true;
-                   }
-
-                   function GetThorSlaveLog() 
-                   {
-                      //document.location.href='/WsWorkunits/WUFile?Wuid='+wid+'&Type=ThorSlaveLog&SlaveIP='+document.getElementById('ThorSlaveIP').value;
-            getOptions('ThorSlave.log', '/WsWorkunits/WUFile?Wuid='+wid+'&Type=ThorSlaveLog&SlaveIP='+document.getElementById('ThorSlaveIP').value, true); 
                    }
 
            var downloadWnds = new Array();
@@ -606,7 +702,7 @@
                 alert('The workunit must have a jobname to be published. \r\nEnter a jobname, then publish.');
                 return;
               }
-              var cObj = YAHOO.util.Connect.asyncRequest('GET', '/WsWorkunits/WUPublishWorkunit?rawxml_&Wuid=' + wuid + '&JobName=' + Jobname + '&Activate=1&Wait=5000', publishCallback);
+              var cObj = YAHOO.util.Connect.asyncRequest('GET', '/WsWorkunits/WUPublishWorkunit?rawxml_&Wuid=' + wuid + '&JobName=' + Jobname + '&Activate=1&UpdateWorkUnitName=1&Wait=5000', publishCallback);
             }
 
         /*

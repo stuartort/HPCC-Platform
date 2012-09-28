@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #include "jmisc.hpp"
@@ -673,7 +672,7 @@ public:
         return inputs.get(idx, sourceidx);
     }
 
-    inline unsigned numInputs() const { return inputs.ordinality(); }
+    virtual unsigned numInputs() const { return inputs.ordinality(); }
 };
 
 class CWrappedException : public CInterface, implements IException
@@ -728,6 +727,8 @@ public:
         }
         return (unsigned) -1;
     }
+
+    virtual unsigned numInputs() const { return (input == (unsigned)-1) ? 0 : 1; }
 };
 
 class CRoxieServerMultiOutputFactory : public CRoxieServerActivityFactory
@@ -6866,6 +6867,7 @@ class CRoxieServerRollupActivity : public CRoxieServerActivity
 {
     IHThorRollupArg &helper;
     OwnedConstRoxieRow left;
+    OwnedConstRoxieRow prev;
     OwnedConstRoxieRow right;
     bool readFirstRow;
 
@@ -6889,6 +6891,7 @@ public:
     virtual void reset()    
     {
         left.clear();
+        prev.clear();
         right.clear();
         CRoxieServerActivity::reset();
     }
@@ -6901,18 +6904,20 @@ public:
         if (!readFirstRow)
         {
             left.setown(input->nextInGroup());
+            prev.set(left);
             readFirstRow = true;
         }
 
         loop
         {
             right.setown(input->nextInGroup());
-            if(!left || !right || !helper.matches(left,right))
+            if(!prev || !right || !helper.matches(prev,right))
             {
                 const void * ret = left.getClear();
                 if(ret)
                     processed++;
                 left.setown(right.getClear());
+                prev.set(left);
                 return ret;
             }
             try
@@ -6921,6 +6926,7 @@ public:
                 unsigned outSize = helper.transform(rowBuilder, left, right);
                 if (outSize)
                     left.setown(rowBuilder.finalizeRowClear(outSize));
+                prev.set(right);
             }
             catch(IException * E)
             {
@@ -12098,6 +12104,7 @@ public:
         }
     }
 
+    virtual unsigned numInputs() const { return 2; }
 };
 
 IRoxieServerActivityFactory *createRoxieServerJoinActivityFactory(unsigned _id, unsigned _subgraphId, IQueryFactory &_queryFactory, HelperFactory *_helperFactory, ThorActivityKind _kind)
@@ -13143,6 +13150,7 @@ public:
         }
     }
 
+    virtual unsigned numInputs() const { return 2; }
 };
 
 IRoxieServerActivityFactory *createRoxieServerCombineGroupActivityFactory(unsigned _id, unsigned _subgraphId, IQueryFactory &_queryFactory, HelperFactory *_helperFactory, ThorActivityKind _kind)
@@ -15133,7 +15141,7 @@ public:
         return inputs.get(idx, sourceidx);
     }
 
-    inline unsigned numInputs() const { return inputs.ordinality(); }
+    virtual unsigned numInputs() const { return inputs.ordinality(); }
 };
 
 IRoxieServerActivityFactory *createRoxieServerLibraryCallActivityFactory(unsigned _id, unsigned _subgraphId, IQueryFactory &_queryFactory, HelperFactory *_helperFactory, ThorActivityKind _kind, LibraryCallFactoryExtra & _extra)
@@ -18356,6 +18364,7 @@ public:
 protected:
     void onException(IException *E)
     {
+        input->stop(true);
         ReleaseRoxieRowSet(buff);
         if (createRow)
         {
@@ -18460,7 +18469,9 @@ public:
     {
         CRoxieServerActivity::start(parentExtractSize, parentExtract, paused);
         cond = helper.getBranch();
-        assertex(cond < numInputs);
+        //CHOOSE defaults to the last argument if out of range.
+        if (cond >= numInputs)
+            cond = numInputs - 1;
         inputs[cond]->start(parentExtractSize, parentExtract, paused);
         for (unsigned idx = 0; idx < numInputs; idx++)
         {
@@ -18698,6 +18709,8 @@ public:
             return (unsigned) -1; 
         }
     }
+
+    virtual unsigned numInputs() const { return (input2 == (unsigned)-1) ? 1 : 2; }
 
     virtual bool isGraphInvariant() const
     {
@@ -20575,7 +20588,7 @@ public:
     CRoxieServerDiskReadActivityFactory(unsigned _id, unsigned _subgraphId, IQueryFactory &_queryFactory, HelperFactory *_helperFactory, ThorActivityKind _kind, const RemoteActivityId &_remoteId, IPropertyTree &_graphNode)
         : CRoxieServerActivityFactory(_id, _subgraphId, _queryFactory, _helperFactory, _kind), remoteId(_remoteId)
     {
-        isLocal = _graphNode.getPropBool("att[@name='local']/@value");
+        isLocal = _graphNode.getPropBool("att[@name='local']/@value") && queryFactory.queryChannel()!=0;
         Owned<IHThorDiskReadBaseArg> helper = (IHThorDiskReadBaseArg *) helperFactory();
         sorted = (helper->getFlags() & TDRunsorted) == 0;
         variableFileName = (helper->getFlags() & (TDXvarfilename|TDXdynamicfilename)) != 0;
@@ -20655,7 +20668,6 @@ protected:
     IHThorSteppedSourceExtra * steppedExtra;
     Linked<IKeyArray> keySet;
     Linked<TranslatorArray> translators;
-    unsigned rawSize;
     CSkippableRemoteResultAdaptor remote;
     CIndexTransformCallback callback;
     bool sorted;
@@ -20683,11 +20695,10 @@ protected:
 
 public:
     CRoxieServerIndexActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager, const RemoteActivityId &_remoteId,
-        IKeyArray * _keySet, TranslatorArray *_translators, unsigned _rawSize, bool _sorted, bool _isLocal, bool _maySkip)
+        IKeyArray * _keySet, TranslatorArray *_translators, bool _sorted, bool _isLocal, bool _maySkip)
         : CRoxieServerActivity(_factory, _probeManager), 
           keySet(_keySet),
           translators(_translators),
-          rawSize(_rawSize),
           indexHelper((IHThorIndexReadBaseArg &)basehelper),
           remote(_remoteId, meta.queryOriginal(), indexHelper, *this, _sorted, false, _maySkip),
           remoteId(_remoteId),
@@ -20887,8 +20898,8 @@ class CRoxieServerIndexReadBaseActivity : public CRoxieServerIndexActivity
     IHThorSourceLimitTransformExtra * limitTransformExtra;
 public:
     CRoxieServerIndexReadBaseActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager, const RemoteActivityId &_remoteId,
-        IKeyArray * _keySet, TranslatorArray *_translators, unsigned _rawSize, unsigned _maxRecordSize, bool _sorted, bool _isLocal, bool _maySkip)
-        : CRoxieServerIndexActivity(_factory, _probeManager, _remoteId, _keySet, _translators, _rawSize, _sorted, _isLocal, _maySkip)
+        IKeyArray * _keySet, TranslatorArray *_translators, bool _sorted, bool _isLocal, bool _maySkip)
+        : CRoxieServerIndexActivity(_factory, _probeManager, _remoteId, _keySet, _translators, _sorted, _isLocal, _maySkip)
     {
         limitTransformExtra = static_cast<IHThorSourceLimitTransformExtra *>(indexHelper.selectInterface(TAIsourcelimittransformextra_1));
     }
@@ -20941,8 +20952,8 @@ protected:
 
 public:
     CRoxieServerIndexReadActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager, const RemoteActivityId &_remoteId,
-        IKeyArray * _keySet, TranslatorArray *_translators, unsigned _rawSize, unsigned _maxRecordSize, bool _sorted, bool _isLocal, bool _maySkip, unsigned _maxSeekLookahead)
-        : CRoxieServerIndexReadBaseActivity(_factory, _probeManager, _remoteId, _keySet, _translators, _rawSize, _maxRecordSize, _sorted, _isLocal, _maySkip), 
+        IKeyArray * _keySet, TranslatorArray *_translators, bool _sorted, bool _isLocal, bool _maySkip, unsigned _maxSeekLookahead)
+        : CRoxieServerIndexReadBaseActivity(_factory, _probeManager, _remoteId, _keySet, _translators, _sorted, _isLocal, _maySkip),
           readHelper((IHThorIndexReadArg &)basehelper)
     {
         rawMeta = readHelper.queryRawSteppingMeta();
@@ -21025,7 +21036,7 @@ public:
             keySet.setown(createKeyIndexSet());
             keySet->addIndex(LINK(key));
             if (owner.seekGEOffset)
-                tlk.setown(createKeyMerger(keySet, owner.rawSize, owner.seekGEOffset, &owner)); 
+                tlk.setown(createKeyMerger(keySet, 0, owner.seekGEOffset, &owner));
             else
                 tlk.setown(createKeyManager(keySet->queryPart(0), 0, &owner));
             tlk->setLayoutTranslator(trans);
@@ -21261,12 +21272,10 @@ class CRoxieServerSimpleIndexReadActivity : public CRoxieServerActivity, impleme
     unsigned accepted;
     unsigned rejected;
     unsigned keyedCount;
-    unsigned rawSize;
     ISteppingMeta * rawMeta;
     ISteppingMeta * projectedMeta;
     size32_t seekGEOffset;
     unsigned * seekSizes;
-    size32_t eclKeySize;
     CSteppingMeta steppingMeta;
     Owned<const IResolvedFile> varFileInfo;
     const RemoteActivityId &remoteId;
@@ -21321,12 +21330,11 @@ class CRoxieServerSimpleIndexReadActivity : public CRoxieServerActivity, impleme
 
 public:
     CRoxieServerSimpleIndexReadActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager, const RemoteActivityId &_remoteId,
-            IKeyArray *_keyArray, TranslatorArray *_translatorArray, unsigned _rawSize, unsigned _maxRecordSize, bool _isLocal)
+            IKeyArray *_keyArray, TranslatorArray *_translatorArray, bool _isLocal)
         : CRoxieServerActivity(_factory, _probeManager), 
           readHelper((IHThorIndexReadArg &)basehelper), 
           indexHelper((IHThorIndexReadArg &)basehelper), 
           translators(_translatorArray),
-          rawSize(_rawSize), 
           keySet(_keyArray),
           isLocal(_isLocal),
           remoteId(_remoteId)
@@ -21349,7 +21357,6 @@ public:
         eof = false;
         rawMeta = readHelper.queryRawSteppingMeta();
         projectedMeta = readHelper.queryProjectedSteppingMeta();
-        eclKeySize = indexHelper.queryDiskRecordSize()->getRecordSize(NULL);
         seekGEOffset = 0;
         seekSizes = NULL;
         if (rawMeta)
@@ -21457,7 +21464,7 @@ public:
             }
             if (numParts > 1 || seekGEOffset)
             {
-                tlk.setown(createKeyMerger(keyIndexSet, rawSize, seekGEOffset, this));
+                tlk.setown(createKeyMerger(keyIndexSet, 0, seekGEOffset, this));
                 // note that we don't set up translator because we don't support it. If that ever changes...
             }
             else
@@ -21653,7 +21660,6 @@ public:
     Owned<IKeyArray> keySet;
     Owned<TranslatorArray> translatorArray;
     Owned<IDefRecordMeta> activityMeta;
-    unsigned maxRecordSize;
     RemoteActivityId remoteId;
     bool isSimple;
     bool isLocal;
@@ -21661,7 +21667,6 @@ public:
     bool sorted;
     bool variableFileName;
     bool enableFieldTranslation;
-    unsigned rawSize;
     unsigned maxSeekLookahead;
     Owned<const IResolvedFile> indexfile;
 
@@ -21673,7 +21678,7 @@ public:
         Owned<IHThorIndexReadBaseArg> indexHelper = (IHThorIndexReadBaseArg *) helperFactory();
         unsigned flags = indexHelper->getFlags();
         sorted = (flags & TIRsorted) != 0;
-        isLocal = _graphNode.getPropBool("att[@name='local']/@value");
+        isLocal = _graphNode.getPropBool("att[@name='local']/@value") && queryFactory.queryChannel()!=0;
         rtlDataAttr indexLayoutMeta;
         size32_t indexLayoutSize;
         if(!indexHelper->getIndexLayout(indexLayoutSize, indexLayoutMeta.refdata()))
@@ -21691,8 +21696,6 @@ public:
             if (indexfile)
                 keySet.setown(indexfile->getKeyArray(activityMeta, translatorArray, isOpt, isLocal ? queryFactory.queryChannel() : 0, enableFieldTranslation));
         }
-        maxRecordSize = meta.getRecordSize(NULL);
-        rawSize = indexHelper->queryDiskRecordSize()->getRecordSize(NULL);  
         isSimple = isLocal;
         maySkip = (flags & (TIRkeyedlimitskips|TIRlimitskips|TIRlimitcreates|TIRkeyedlimitcreates)) != 0;
 
@@ -21747,9 +21750,9 @@ public:
         if (!variableFileName && (keySet==NULL || keySet->length()==0))
             return new CRoxieServerNullActivity(this, _probeManager);
         else if (isSimple && !maySkip)
-            return new CRoxieServerSimpleIndexReadActivity(this, _probeManager, remoteId, keySet, translatorArray, rawSize, maxRecordSize, isLocal);
+            return new CRoxieServerSimpleIndexReadActivity(this, _probeManager, remoteId, keySet, translatorArray, isLocal);
         else
-            return new CRoxieServerIndexReadActivity(this, _probeManager, remoteId, keySet, translatorArray, rawSize, maxRecordSize, sorted, isLocal, maySkip, maxSeekLookahead);
+            return new CRoxieServerIndexReadActivity(this, _probeManager, remoteId, keySet, translatorArray, sorted, isLocal, maySkip, maxSeekLookahead);
     }
 };
 
@@ -21803,8 +21806,8 @@ class CRoxieServerIndexCountActivity : public CRoxieServerIndexActivity
     bool done;
 
 public:
-    CRoxieServerIndexCountActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager, const RemoteActivityId &_remoteId, IKeyArray * _keySet, TranslatorArray *_translators, unsigned _rawSize, bool _isLocal)
-        : CRoxieServerIndexActivity(_factory, _probeManager, _remoteId, _keySet, _translators, _rawSize, false, _isLocal, false), 
+    CRoxieServerIndexCountActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager, const RemoteActivityId &_remoteId, IKeyArray * _keySet, TranslatorArray *_translators, bool _isLocal)
+        : CRoxieServerIndexActivity(_factory, _probeManager, _remoteId, _keySet, _translators, false, _isLocal, false),
           countHelper((IHThorIndexCountArg &)basehelper),
           done(false)
     {
@@ -22003,9 +22006,9 @@ public:
         if (!variableFileName && (keySet==NULL || keySet->length()==0))
             return new CRoxieServerNullCountActivity(this, _probeManager);
 //      else if (isSimple)
-//          return new CRoxieServerSimpleIndexCountActivity(this, keySet->queryKeyPart(0)->queryPart(0), rawSize, maxRecordSize);
+//          return new CRoxieServerSimpleIndexCountActivity(this, keySet->queryKeyPart(0)->queryPart(0));
         else
-            return new CRoxieServerIndexCountActivity(this, _probeManager, remoteId, keySet, translatorArray, rawSize, isLocal);
+            return new CRoxieServerIndexCountActivity(this, _probeManager, remoteId, keySet, translatorArray, isLocal);
     }
 };
 
@@ -22019,14 +22022,12 @@ IRoxieServerActivityFactory *createRoxieServerIndexCountActivityFactory(unsigned
 class CRoxieServerNullIndexAggregateActivity : public CRoxieServerActivity
 {
     IHThorIndexAggregateArg &aggregateHelper;
-    unsigned maxRecordSize;
     bool done;
 public:
-    CRoxieServerNullIndexAggregateActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager, unsigned _maxRecordSize)
+    CRoxieServerNullIndexAggregateActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager)
         : CRoxieServerActivity(_factory, _probeManager),
           aggregateHelper((IHThorIndexAggregateArg &)basehelper)
     {
-        maxRecordSize = _maxRecordSize;
         done = false;
     }
 
@@ -22056,8 +22057,8 @@ class CRoxieServerIndexAggregateActivity : public CRoxieServerIndexActivity
 
 public:
     CRoxieServerIndexAggregateActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager, const RemoteActivityId &_remoteId,
-        IKeyArray * _keySet, TranslatorArray *_translators, unsigned _rawSize, bool _isLocal)
-        : CRoxieServerIndexActivity(_factory, _probeManager, _remoteId, _keySet, _translators, _rawSize, false, _isLocal, false), 
+        IKeyArray * _keySet, TranslatorArray *_translators, bool _isLocal)
+        : CRoxieServerIndexActivity(_factory, _probeManager, _remoteId, _keySet, _translators, false, _isLocal, false),
           aggregateHelper((IHThorIndexAggregateArg &)basehelper),
           done(false)
     {
@@ -22165,11 +22166,11 @@ public:
     virtual IRoxieServerActivity *createActivity(IProbeManager *_probeManager) const
     {
         if (!variableFileName && (keySet==NULL || keySet->length()==0))
-            return new CRoxieServerNullIndexAggregateActivity(this, _probeManager, maxRecordSize);
+            return new CRoxieServerNullIndexAggregateActivity(this, _probeManager);
 //      else if (isSimple)
-//          return new CRoxieServerSimpleIndexAggregateActivity(this, keySet->queryKeyPart(0)->queryPart(0), rawSize, maxRecordSize);
+//          return new CRoxieServerSimpleIndexAggregateActivity(this, keySet->queryKeyPart(0)->queryPart(0));
         else
-            return new CRoxieServerIndexAggregateActivity(this, _probeManager, remoteId, keySet, translatorArray, rawSize, isLocal);
+            return new CRoxieServerIndexAggregateActivity(this, _probeManager, remoteId, keySet, translatorArray, isLocal);
     }
 };
 
@@ -22191,8 +22192,8 @@ class CRoxieServerIndexGroupAggregateActivity : public CRoxieServerIndexActivity
 
 public:
     CRoxieServerIndexGroupAggregateActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager, const RemoteActivityId &_remoteId,
-        IKeyArray * _keySet, TranslatorArray *_translators, unsigned _rawSize, bool _isLocal)
-        : CRoxieServerIndexActivity(_factory, _probeManager, _remoteId, _keySet, _translators, _rawSize, false, _isLocal, false), 
+        IKeyArray * _keySet, TranslatorArray *_translators, bool _isLocal)
+        : CRoxieServerIndexActivity(_factory, _probeManager, _remoteId, _keySet, _translators, false, _isLocal, false),
           aggregateHelper((IHThorIndexGroupAggregateArg &)basehelper),
           singleAggregator(aggregateHelper, aggregateHelper),
           resultAggregator(aggregateHelper, aggregateHelper),
@@ -22360,9 +22361,9 @@ public:
         if (!variableFileName && (keySet==NULL || keySet->length()==0))
             return new CRoxieServerNullActivity(this, _probeManager);
 //      else if (isSimple)
-//          return new CRoxieServerSimpleIndexGroupAggregateActivity(this, keySet->queryKeyPart(0)->queryPart(0), rawSize, maxRecordSize);
+//          return new CRoxieServerSimpleIndexGroupAggregateActivity(this, keySet->queryKeyPart(0)->queryPart(0));
         else
-            return new CRoxieServerIndexGroupAggregateActivity(this, _probeManager, remoteId, keySet, translatorArray, rawSize, isLocal);
+            return new CRoxieServerIndexGroupAggregateActivity(this, _probeManager, remoteId, keySet, translatorArray, isLocal);
     }
 };
 
@@ -22379,8 +22380,8 @@ class CRoxieServerIndexNormalizeActivity : public CRoxieServerIndexReadBaseActiv
 
 public:
     CRoxieServerIndexNormalizeActivity(const IRoxieServerActivityFactory *_factory, IProbeManager *_probeManager, const RemoteActivityId &_remoteId,
-        IKeyArray * _keySet, TranslatorArray *_translators, unsigned _rawSize, unsigned _maxRecordSize, bool _sorted, bool _isLocal)
-        : CRoxieServerIndexReadBaseActivity(_factory, _probeManager, _remoteId, _keySet, _translators, _rawSize, _maxRecordSize, _sorted, _isLocal, false), 
+        IKeyArray * _keySet, TranslatorArray *_translators, bool _sorted, bool _isLocal)
+        : CRoxieServerIndexReadBaseActivity(_factory, _probeManager, _remoteId, _keySet, _translators, _sorted, _isLocal, false),
           readHelper((IHThorIndexNormalizeArg &)basehelper)
     {
     }
@@ -22491,7 +22492,7 @@ public:
         if (!variableFileName && (keySet==NULL || keySet->length()==0))
             return new CRoxieServerNullActivity(this, _probeManager);
         else
-            return new CRoxieServerIndexNormalizeActivity(this, _probeManager, remoteId, keySet, translatorArray, rawSize, maxRecordSize, sorted, isLocal);
+            return new CRoxieServerIndexNormalizeActivity(this, _probeManager, remoteId, keySet, translatorArray, sorted, isLocal);
     }
 };
 
@@ -22847,7 +22848,7 @@ public:
         {
             if (_graphNode.getPropBool("att[@name='_isSpill']/@value", false) || _graphNode.getPropBool("att[@name='_isSpillGlobal']/@value", false))
                 return;  // ignore 'spills'
-            bool isLocal = _graphNode.getPropBool("att[@name='local']/@value");
+            bool isLocal = _graphNode.getPropBool("att[@name='local']/@value") && queryFactory.queryChannel()!=0;
             bool isOpt = _graphNode.getPropBool("att[@name='_isOpt']/@value") || pretendAllOpt;
             if (queryNodeIndexName(_graphNode))
             {
@@ -24342,7 +24343,7 @@ public:
         : CRoxieServerMultiInputFactory(_id, _subgraphId, _queryFactory, _helperFactory, _kind), headId(_headId), tailId(_tailId)
     {
         Owned<IHThorKeyedJoinArg> helper = (IHThorKeyedJoinArg *) helperFactory();
-        isLocal = _graphNode.getPropBool("att[@name='local']/@value");
+        isLocal = _graphNode.getPropBool("att[@name='local']/@value") && queryFactory.queryChannel()!=0;
         isSimple = isLocal;
         rtlDataAttr indexLayoutMeta;
         size32_t indexLayoutSize;
@@ -24492,7 +24493,10 @@ public:
 
         if (soaphelper == NULL)
         {
-            soaphelper.setown(createSoapCallHelper(this, rowAllocator, authToken.str(), SCrow, pClientCert, *ctx, this));
+            if (factory->getKind()==TAKhttp_rowdataset)
+                soaphelper.setown(createHttpCallHelper(this, rowAllocator, authToken.str(), SCrow, pClientCert, *ctx, this));
+            else
+                soaphelper.setown(createSoapCallHelper(this, rowAllocator, authToken.str(), SCrow, pClientCert, *ctx, this));
             soaphelper->start();
         }
 
@@ -27111,6 +27115,8 @@ public:
                         break;
                     case TAKcase: case TAKchildcase:
                         branch = static_cast<IHThorCaseArg *>(helper.get())->getBranch();
+                        if (branch >= donor.numInputs())
+                            branch = donor.numInputs() - 1;
                         break;
                     default:
                         throwUnexpected();
@@ -27820,7 +27826,8 @@ public:
         }
         else
         {
-            Owned<IQueryFactory> libraryQuery = globalPackageSetManager->lookupLibrary(extra.libraryName, extra.interfaceHash, *this);
+            Owned<IQueryFactory> libraryQuery = factory->lookupLibrary(extra.libraryName, extra.interfaceHash, *this);
+            assertex(libraryQuery);
             return libraryQuery->lookupGraph("graph1", probeManager, *this, parentActivity);
         }
     }
@@ -28113,7 +28120,7 @@ public:
     {
         // MORE - may need to do some caching/commoning up here otherwise GRAPH in a child query may use too many
         SpinBlock b(allAllocatorsLock);
-        IEngineRowAllocator * ret = createRoxieRowAllocator(*rowManager, meta, activityId, allAllocators.ordinality(), false);
+        IEngineRowAllocator * ret = createRoxieRowAllocator(*rowManager, meta, activityId, allAllocators.ordinality(), roxiemem::RHFnone);
         LINK(ret);
         allAllocators.append(*ret);
         return ret;
@@ -28237,8 +28244,7 @@ public:
     virtual void debugInitialize(const char *id, const char *_queryName, bool _breakAtStart)
     {
         CBaseServerDebugContext::debugInitialize(id, _queryName, _breakAtStart);
-        Owned<IRoxieDebugSessionManager> QM = globalPackageSetManager->getRoxieDebugSessionManager();
-        QM->registerDebugId(id, this);
+        queryRoxieDebugSessionManager().registerDebugId(id, this);
     }
 
     virtual void debugTerminate()
@@ -28247,8 +28253,7 @@ public:
         assertex(running);
         currentState = DebugStateUnloaded;
         running = false;
-        Owned<IRoxieDebugSessionManager> QM = globalPackageSetManager->getRoxieDebugSessionManager();
-        QM->deregisterDebugId(debugId);
+        queryRoxieDebugSessionManager().deregisterDebugId(debugId);
         if (debuggerActive)
         {
             debuggerSem.signal(debuggerActive);
@@ -29435,7 +29440,7 @@ public:
                 CriticalBlock b(contextCrit);
                 useContext(sequence).getProp(stepname, x);
             }
-            TempDecimal d;
+            Decimal d;
             d.setString(x.length(), x.str());
             if (isSigned)
                 d.getDecimal(tlen, precision, tgt);
@@ -29467,9 +29472,11 @@ public:
             loop
             {
                 char c0 = *val++;
-                char c1 = *val++;
-                if (!c0 || !c1)
+                if (!c0)
                     break;
+                char c1 = *val++;
+                if (!c1)
+                    break; // Shouldn't really happen - we expect even length
                 unsigned c2 = (hex2digit(c0) << 4) | hex2digit(c1);
                 result.append((unsigned char) c2);
             }
@@ -30117,7 +30124,19 @@ public:
     { 
         return strdup("roxie"); 
     }
-    virtual char *getWuid() { throwUnexpected(); }
+    virtual char *getWuid()
+    {
+        if (workUnit)
+        {
+            SCMStringBuffer wuid;
+            workUnit->getWuid(wuid);
+            return strdup(wuid.str());
+        }
+        else
+        {
+            throw MakeStringException(ROXIE_INVALID_ACTION, "No workunit associated with this context");
+        }
+    }
 
     // persist-related code - usage of persist should have been caught and rejected at codegen time
     virtual char * getExpandLogicalName(const char * logicalName) { throwUnexpected(); }
@@ -30156,7 +30175,7 @@ public:
     virtual bool fileExists(const char * filename) { throwUnexpected(); }
     virtual void deleteFile(const char * logicalName) { throwUnexpected(); }
 
-    virtual unsigned getNodes() { return 1; }
+    virtual unsigned getNodes() { return numChannels; }
     virtual unsigned getNodeNum() { return 1; }
     virtual char *getFilePart(const char *logicalPart, bool create=false) { UNIMPLEMENTED; }
     virtual unsigned __int64 getFileOffset(const char *logicalPart) { throwUnexpected(); }
@@ -30631,7 +30650,7 @@ public:
 
         public:
             casyncfor(const char *_queryText, CascadeManager *_parent, IPropertyTree *_mergedStats, 
-                      StringBuffer &_reply, SocketEndpoint &_ep, unsigned _numChildren, const IRoxieContextLogger &_logctx) 
+                      StringBuffer &_reply, SocketEndpoint &_ep, unsigned _numChildren, const IRoxieContextLogger &_logctx)
                 : queryText(_queryText), parent(_parent), mergedStats(_mergedStats), reply(_reply), ep(_ep), numChildren(_numChildren), logctx(_logctx)
             {
             }
@@ -31030,29 +31049,47 @@ public:
         running = true;
         started.signal();
         Owned<IRoxieDaliHelper> daliHelper = connectToDali();
-        if (daliHelper->connected())
+        while (running)
         {
-            SCMStringBuffer queueNames;
-            getRoxieQueueNames(queueNames, topology->queryProp("@name"));
-            if (traceLevel)
-                DBGLOG("roxie: Waiting on queue(s) '%s'", queueNames.str());
-            Owned<IJobQueue> queue = createJobQueue(queueNames.str());
-            queue->connect();
-            while (running)
+            if (daliHelper->connected())
             {
-                Owned<IJobQueueItem> item = queue->dequeue(5000);
-                if (item.get())
+                SCMStringBuffer queueNames;
+                getRoxieQueueNames(queueNames, topology->queryProp("@name"));
+                if (queueNames.length())
                 {
                     if (traceLevel)
-                        PROGLOG("roxie: Dequeued workunit request '%s'", item->queryWUID());
-                    pool->start((void *) item->queryWUID());
+                        DBGLOG("roxie: Waiting on queue(s) '%s'", queueNames.str());
+                    try
+                    {
+                        Owned<IJobQueue> queue = createJobQueue(queueNames.str());
+                        queue->connect();
+                        daliHelper->noteQueuesRunning(queueNames.str());
+                        while (running)
+                        {
+                            Owned<IJobQueueItem> item = queue->dequeue(5000);
+                            if (item.get())
+                            {
+                                if (traceLevel)
+                                    PROGLOG("roxie: Dequeued workunit request '%s'", item->queryWUID());
+                                pool->start((void *) item->queryWUID());
+                            }
+                        }
+                    }
+                    catch (IDaliClient_Exception *E)
+                    {
+                        if (traceLevel)
+                            EXCLOG(E, "roxie: Dali connection lost");
+                        E->Release();
+                        daliHelper->disconnect();
+                    }
                 }
             }
-        }
-        else
-        {
-            if (traceLevel)
-                DBGLOG("roxie: No dali connection - not waiting on queue");
+            else
+            {
+                if (traceLevel)
+                    DBGLOG("roxie: Waiting for dali connection before waiting for queue");
+                daliHelper->waitConnected();
+            }
         }
         return 0;
     }
@@ -31259,12 +31296,23 @@ public:
     {
         Owned <IRoxieDaliHelper> daliHelper = connectToDali();
         Owned<IConstWorkUnit> wu = daliHelper->attachWorkunit(wuid.get(), NULL);
+        daliHelper->noteWorkunitRunning(wuid.get(), true);
         if (!wu)
             throw MakeStringException(ROXIE_DALI_ERROR, "Failed to open workunit %s", wuid.get());
-        Owned<IQueryFactory> queryFactory = createServerQueryFactoryFromWu(wuid.get());
+        // Ensure that any library lookup is done in the correct QuerySet...
+        // MORE - Not 100% sure if this is right
+        // - there's no package file resolution in play for WUs read from a queue (should there be?),
+        // but as this stands we will resolve libraries using those packages defined as loading for this QuerySet.
+        SCMStringBuffer target;
+        wu->getClusterName(target);
+        Owned<IRoxieLibraryLookupContext> libraryContext = globalPackageSetManager->getLibraryLookupContext(target.str());
+        Owned<IQueryFactory> queryFactory = createServerQueryFactoryFromWu(wu, libraryContext);
         Owned<StringContextLogger> logctx = new StringContextLogger(wuid.get());
         doMain(wu, queryFactory, *logctx);
         sendUnloadMessage(queryFactory->queryHash(), wuid.get(), *logctx);
+        queryFactory.clear();
+        daliHelper->noteWorkunitRunning(wuid.get(), false);
+        clearKeyStoreCache(false);   // Bit of a kludge - cache should really be smarter
     }
 
     void doMain(IConstWorkUnit *wu, IQueryFactory *queryFactory, StringContextLogger &logctx)
@@ -31689,8 +31737,7 @@ readAnother:
 #else
                             throw MakeStringException(ROXIE_DEBUG_ERROR, "Debug id not specified");
 #endif
-                        Owned<IRoxieDebugSessionManager> QM = globalPackageSetManager->getRoxieDebugSessionManager();
-                        debuggerContext.setown(QM->lookupDebuggerContext(uid));
+                        debuggerContext.setown(queryRoxieDebugSessionManager().lookupDebuggerContext(uid));
                         if (!debuggerContext)
                             throw MakeStringException(ROXIE_DEBUG_ERROR, "No active query matching context %s found", uid);
                         if (!debugCmdHandler.get())
@@ -32298,7 +32345,7 @@ protected:
         package.setown(createPackage(NULL));
         ctx.setown(createSlaveContext(NULL, logctx, 0, 50*1024*1024, NULL));
         queryDll.setown(createExeQueryDll("roxie"));
-        queryFactory.setown(createServerQueryFactory("test", queryDll.getLink(), *package, NULL));
+        queryFactory.setown(createServerQueryFactory("test", queryDll.getLink(), *package, NULL, NULL));
         timer->reset();
     }
 

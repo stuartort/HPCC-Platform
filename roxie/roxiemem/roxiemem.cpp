@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #include "roxiemem.hpp"
@@ -93,7 +92,6 @@ static unsigned *heapBitmap;
 static unsigned heapBitmapSize;
 static unsigned heapTotalPages; // derived from heapBitmapSize - here for code clarity
 static unsigned heapLWM;
-static unsigned heapHWM;
 static unsigned heapAllocated;
 static unsigned heapLargeBlocks;
 static unsigned heapLargeBlockGranularity;
@@ -117,7 +115,7 @@ inline VALUE_TYPE align_pow2(VALUE_TYPE value, ALIGN_TYPE alignment)
 
 typedef MapBetween<unsigned, unsigned, memsize_t, memsize_t> MapActivityToMemsize;
 
-CriticalSection heapBitCrit;
+static CriticalSection heapBitCrit;
 
 static void initializeHeap(unsigned pages, unsigned largeBlockGranularity, ILargeMemCallback * largeBlockCallback)
 {
@@ -155,7 +153,6 @@ static void initializeHeap(unsigned pages, unsigned largeBlockGranularity, ILarg
     memset(heapBitmap, 0xff, heapBitmapSize*sizeof(unsigned));
     heapLargeBlocks = 1;
     heapLWM = 0;
-    heapHWM = heapBitmapSize;
 
     if (memTraceLevel)
         DBGLOG("RoxieMemMgr: %u Pages successfully allocated for the pool - memsize=%"I64F"u base=%p alignment=%"I64F"u bitmapSize=%u", 
@@ -348,7 +345,7 @@ static void *suballoc_aligned(size32_t pages, bool returnNullWhenExhausted)
             lastStatsCycles = cyclesNow;
             StringBuffer s;
             memstats(s);
-            s.appendf(", heapLWM %u..%u, dataBuffersActive=%d, dataBufferPages=%d", heapLWM, heapHWM, atomic_read(&dataBuffersActive), atomic_read(&dataBufferPages));
+            s.appendf(", heapLWM %u, dataBuffersActive=%d, dataBufferPages=%d", heapLWM, atomic_read(&dataBuffersActive), atomic_read(&dataBufferPages));
             DBGLOG("RoxieMemMgr: %s", s.str());
         }
     }
@@ -407,7 +404,7 @@ static void *suballoc_aligned(size32_t pages, bool returnNullWhenExhausted)
     else
     {
         // Usage pattern is such that we expect normally to succeed immediately.
-        unsigned i = heapHWM;
+        unsigned i = heapBitmapSize;
         unsigned matches = 0;
         while (i)
         {
@@ -441,7 +438,6 @@ static void *suballoc_aligned(size32_t pages, bool returnNullWhenExhausted)
                             heapBitmap[i] = hbi;
                             if (memTraceLevel >= 2)
                                 DBGLOG("RoxieMemMgr: suballoc_aligned() %u pages ok - addr=%p", pages, ret);
-                            heapHWM = i+1;
                             heapAllocated += pages;
                             return ret;
                         }
@@ -514,8 +510,6 @@ static void subfree_aligned(void *ptr, unsigned pages = 1)
 
         if (wordOffset < heapLWM)
             heapLWM = wordOffset;
-        if (nextPageOffset > heapHWM)
-            heapHWM = nextPageOffset;
         loop
         {
             unsigned prev = heapBitmap[wordOffset];
@@ -535,7 +529,7 @@ static void subfree_aligned(void *ptr, unsigned pages = 1)
         }
     }
     if (memTraceLevel >= 2)
-        DBGLOG("RoxieMemMgr: subfree_aligned() %u pages ok - addr=%p heapLWM=%u..%u totalPages=%u", _pages, ptr, heapLWM, heapHWM, heapTotalPages);
+        DBGLOG("RoxieMemMgr: subfree_aligned() %u pages ok - addr=%p heapLWM=%u totalPages=%u", _pages, ptr, heapLWM, heapTotalPages);
 }
 
 static inline unsigned getRealActivityId(unsigned allocatorId, const IRowAllocatorCache *allocatorCache)
@@ -2429,6 +2423,38 @@ protected:
     {
         callbacks.removeRowBuffer(callback);
     }
+
+    virtual size_t getExpectedCapacity(size32_t size, unsigned heapFlags)
+    {
+        if (size > FixedSizeHeaplet::maxHeapSize())
+        {
+            unsigned numPages = PAGES(size + HugeHeaplet::dataOffset(), HEAP_ALIGNMENT_SIZE);
+            return (numPages * HEAP_ALIGNMENT_SIZE) - HugeHeaplet::dataOffset();
+        }
+
+        if (heapFlags & RHFpacked)
+            return align_pow2(size + PackedFixedSizeHeaplet::chunkHeaderSize, PACKED_ALIGNMENT) - PackedFixedSizeHeaplet::chunkHeaderSize;
+
+        size32_t rounded = roundup(size + FixedSizeHeaplet::chunkHeaderSize);
+        size32_t heapSize = ROUNDEDSIZE(rounded);
+        return heapSize - FixedSizeHeaplet::chunkHeaderSize;
+    }
+
+    virtual size_t getExpectedFootprint(size32_t size, unsigned heapFlags)
+    {
+        if (size > FixedSizeHeaplet::maxHeapSize())
+        {
+            unsigned numPages = PAGES(size + HugeHeaplet::dataOffset(), HEAP_ALIGNMENT_SIZE);
+            return (numPages * HEAP_ALIGNMENT_SIZE);
+        }
+
+        if (heapFlags & RHFpacked)
+            return align_pow2(size + PackedFixedSizeHeaplet::chunkHeaderSize, PACKED_ALIGNMENT);
+
+        size32_t rounded = roundup(size + FixedSizeHeaplet::chunkHeaderSize);
+        size32_t heapSize = ROUNDEDSIZE(rounded);
+        return heapSize;
+    }
 };
 
 
@@ -3236,7 +3262,6 @@ protected:
             _heapBitmapSize = heapBitmapSize;
             _heapTotalPages = heapTotalPages;
             _heapLWM = heapLWM;
-            _heapHWM = heapHWM;
             _heapAllocated = heapAllocated;
         }
         ~HeapPreserver()
@@ -3246,7 +3271,6 @@ protected:
             heapBitmapSize = _heapBitmapSize;
             heapTotalPages = _heapTotalPages;
             heapLWM = _heapLWM;
-            heapHWM = _heapHWM;
             heapAllocated = _heapAllocated;
         }
         char *_heapBase;
@@ -3254,7 +3278,6 @@ protected:
         unsigned _heapBitmapSize;
         unsigned _heapTotalPages;
         unsigned _heapLWM;
-        unsigned _heapHWM;
         unsigned _heapAllocated;
     };
     void initBitmap(unsigned size)
@@ -3265,7 +3288,6 @@ protected:
         heapBitmapSize = size;
         heapTotalPages = heapBitmapSize * UNSIGNED_BITS;
         heapLWM = 0;
-        heapHWM = size;
         heapAllocated = 0;
     }
 
@@ -4009,13 +4031,25 @@ protected:
                 ReleaseRoxieRow(tempRow[i2]);
         }
 
-        //Check small allocations are also aligned
+        //Check small allocations are also aligned, and that size estimates are correct
         size32_t limitSize = firstFractionalHeap;
         for (size_t nextSize = 1; nextSize < limitSize; nextSize++)
         {
-            OwnedRoxieRow row = rowManager->allocate(nextSize, 0);
-            ASSERT(((memsize_t)row.get() & (ALLOC_ALIGNMENT-1)) == 0);
+            {
+                OwnedRoxieRow row = rowManager->allocate(nextSize, 0);
+                ASSERT(((memsize_t)row.get() & (ALLOC_ALIGNMENT-1)) == 0);
+                ASSERT(RoxieRowCapacity(row) == rowManager->getExpectedCapacity(nextSize, 0));
+                ASSERT(RoxieRowCapacity(row) < rowManager->getExpectedFootprint(nextSize, 0));
+            }
+            {
+                Owned<IFixedRowHeap> rowHeap = rowManager->createFixedRowHeap(nextSize, ACTIVITY_FLAG_ISREGISTERED|0, RHFpacked|RHFhasdestructor);
+                OwnedRoxieRow row = rowHeap->allocate();
+                ASSERT(RoxieRowCapacity(row) == rowManager->getExpectedCapacity(nextSize, RHFpacked));
+                ASSERT(RoxieRowCapacity(row) < rowManager->getExpectedFootprint(nextSize, RHFpacked));
+            }
         }
+
+
     }
     void testFixedRelease()
     {
@@ -4130,7 +4164,8 @@ const memsize_t memorySize = 0x60000000;
 class RoxieMemStressTests : public CppUnit::TestFixture
 {
     CPPUNIT_TEST_SUITE( RoxieMemStressTests );
-        CPPUNIT_TEST(testSequential);
+    CPPUNIT_TEST(testFragmenting);
+    CPPUNIT_TEST(testSequential);
     CPPUNIT_TEST_SUITE_END();
     const IContextLogger &logctx;
 
@@ -4167,6 +4202,33 @@ protected:
         unsigned endTime = msTick();
         ReleaseRoxieRow(rows);
         DBGLOG("Time for sequential allocate = %d", endTime - startTime);
+    }
+
+    void testFragmenting()
+    {
+        unsigned requestSize = 32;
+        Owned<IRowManager> rowManager = createRowManager(0, NULL, logctx, NULL);
+        unsigned startTime = msTick();
+        void * prev = rowManager->allocate(requestSize, 1);
+        try
+        {
+            loop
+            {
+                size32_t nextSize = (size32_t)(requestSize*1.25);
+                void *next = rowManager->allocate(nextSize, 1);
+                requestSize = nextSize;
+                ReleaseRoxieRow(prev);
+                prev = next;
+            }
+        }
+        catch (IException *E)
+        {
+            E->Release();
+        }
+        ReleaseRoxieRow(prev);
+        unsigned endTime = msTick();
+        DBGLOG("Time for fragmenting allocate = %d, max allocation=%u, limit = %"I64F"u", endTime - startTime, requestSize, (unsigned __int64) memorySize);
+        ASSERT(requestSize > memorySize/4);
     }
 };
 

@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #include <platform.h>
@@ -405,7 +404,7 @@ class CFileCloner
 
 
 
-    void cloneSubFile(IPropertyTree *ftree,const char *destfilename)                // name already has prefix added
+    void cloneSubFile(IPropertyTree *ftree,const char *destfilename, INode *srcdali)   // name already has prefix added
     {
         Owned<IFileDescriptor> srcfdesc = deserializeFileDescriptorTree(ftree,&queryNamedGroupStore(),0);
         const char * kind = srcfdesc->queryProperties().queryProp("@kind");
@@ -458,11 +457,14 @@ class CFileCloner
             physicalReplicateFile(dstfdesc,destfilename);
         }
 
+        if (srcdali && !srcdali->endpoint().isNull())
+        {
+            StringBuffer s;
+            dstfdesc->queryProperties().setProp("@cloneFrom", srcdali->endpoint().getUrlStr(s).str());
+        }
+
         Owned<IDistributedFile> dstfile = fdir->createNew(dstfdesc);
         dstfile->attach(destfilename,userdesc);
-
-
-
     }
 
     void extendSubFile(IPropertyTree *ftree,const char *destfilename)
@@ -618,7 +620,7 @@ public:
             dfile.clear();
         }
         if (strcmp(ftree->queryName(),queryDfsXmlBranchName(DXB_File))==0) {
-            cloneSubFile(ftree,dlfn.get());
+            cloneSubFile(ftree,dlfn.get(), srcdali);
         }
         else if (strcmp(ftree->queryName(),queryDfsXmlBranchName(DXB_SuperFile))==0) {
             StringArray subfiles;
@@ -693,7 +695,7 @@ public:
             }
             dfile.clear();
         }
-        cloneSubFile(ftree,dlfn.get());
+        cloneSubFile(ftree,dlfn.get(),srcdali);
         level--;
     }
 
@@ -708,34 +710,37 @@ public:
 
     void addSuper(const char *superfname, unsigned numtoadd, const char **subfiles, const char *before,IUserDescriptor *user)
     {
+        if (!numtoadd)
+            throwError(DFUERR_DNoSubfileToAddToSuperFile);
+
         Owned<IDistributedFileTransaction> transaction = createDistributedFileTransaction(user);
-        Owned<IDistributedSuperFile> superfile = queryDistributedFileDirectory().lookupSuperFile(superfname,user,transaction);
-        bool newfile = false;
-        if (!superfile) {
+        transaction->start();
+
+        Owned<IDistributedSuperFile> superfile = transaction->lookupSuperFile(superfname);
+        if (!superfile)
             superfile.setown(queryDistributedFileDirectory().createSuperFile(superfname,true,false,user,transaction));
-            newfile = true;
+
+        for (unsigned i=0;i<numtoadd;i++)
+        {
+            if (superfile->querySubFileNamed(subfiles[i]))
+                throwError1(DFUERR_DSuperFileContainsSub, subfiles[i]);
+
+            if (before&&*before)
+                superfile->addSubFile(subfiles[i],true,(stricmp(before,"*")==0)?NULL:before,false,transaction);
+            else
+                superfile->addSubFile(subfiles[i],false,NULL,false,transaction);
         }
-        if (numtoadd) {
-            transaction->start();
-            unsigned i;
-            for (i=0;i<numtoadd;i++)
-                if (superfile->querySubFileNamed(subfiles[i]))
-                    throwError1(DFUERR_DSuperFileContainsSub, subfiles[i]);
-            for (i=0;i<numtoadd;i++) {
-                if (before&&*before)
-                    superfile->addSubFile(subfiles[i],true,(stricmp(before,"*")==0)?NULL:before,false,transaction);
-                else
-                    superfile->addSubFile(subfiles[i],false,NULL,false,transaction);
-            }
-            transaction->commit();
-        }
+        transaction->commit();
     }
 
 
-    void removeSuper(const char *superfname, unsigned numtodelete, const char **subfiles, bool delsub, IUserDescriptor *user)
+    void removeSuper(const char *superfname, unsigned numtodelete, const char **subfiles, bool delsub, bool removesuperfile, IUserDescriptor *user)
     {
         Owned<IDistributedFileTransaction> transaction = createDistributedFileTransaction(user);
-        Owned<IDistributedSuperFile> superfile = queryDistributedFileDirectory().lookupSuperFile(superfname,user,transaction,true);
+        // We need this here, since caching only happens with active transactions
+        // MORE - abstract this with DFSAccess, or at least enable caching with a flag
+        Owned<IDistributedSuperFile> superfile = transaction->lookupSuperFileCached(superfname);
+
         if (!superfile)
             throwError1(DFUERR_DSuperFileNotFound, superfname);
         StringAttrArray toremove;
@@ -777,9 +782,7 @@ public:
             transaction->commit();
         }
         // Delete superfile if empty
-        if (superfile->numSubFiles() != 0) {
-            if (numtodelete == 0)
-                throwError1(DFUERR_DSuperFileNotEmpty, superfname);
+        if (removesuperfile && (superfile->numSubFiles() == 0)) {
             superfile.clear();
             // MORE - add file deletion to transaction
             queryDistributedFileDirectory().removeEntry(superfname);
@@ -951,7 +954,7 @@ public:
         cloner.cloneSuperFile(srcname,dlfn);
     }
 
-    void createSingleFileClone(const char *srcname,             // src LFN (can't be super)
+    void createSingleFileClone(const char *srcname,         // src LFN (can't be super)
                          const char *dstname,               // dst LFN
                          const char *cluster1,              // group name of roxie cluster
                          DFUclusterPartDiskMapping clustmap, // how the nodes are mapped

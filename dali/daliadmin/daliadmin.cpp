@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #include "platform.h"
@@ -86,7 +85,7 @@ void usage(const char *exe)
   printf("  setprotect <logicalname> <id>  -- overwrite protects logical file\n");
   printf("  unprotect <logicalname> <id>   -- unprotect (if id=* then clear all)\n");
   printf("  listprotect <logicalnamemask>  <id-mask> -- list protected files\n");
-  printf("  checksuperfile <superfilename> -- check superfile links consistent\n");
+  printf("  checksuperfile <superfilename> [fix=true|false] -- check superfile links consistent and optionally fix\n");
   printf("  checksubfile <subfilename>     -- check subfile links to parent consistent\n");
   printf("  listexpires <logicalnamemask>  -- lists logical files with expiry value\n");
   printf("  listrelationships <primary> <secondary>\n");
@@ -2122,37 +2121,11 @@ int main(int argc, char* argv[])
         bool rawlog = props->getPropBool("rawlog");
         Owned<ILogMsgHandler> fileMsgHandler;
         if (props->getProp("logfile",logname)) {
-            if (logname.length()) 
+            if (logname.length()) {
                 fileMsgHandler.setown(getFileLogMsgHandler(logname.str(), NULL, rawlog?MSGFIELD_prefix:MSGFIELD_STANDARD, false, false, true));
-        }
-        else {
-            logname.append("daliadmin");
-            StringBuffer aliasLogName;
-            StringBuffer logdir;
-            if (getConfigurationDirectory(NULL,"log","daliadmin",logname.str(),logdir)) {
-                recursiveCreateDirectory(logdir.str());
-                StringBuffer tmp(logname);
-                addPathSepChar(logname.clear().append(logdir)).append(tmp);
+                queryLogMsgManager()->addMonitorOwn(fileMsgHandler.getClear(), getCategoryLogMsgFilter(MSGAUD_all, MSGCLS_all, TopDetail));
             }
-            for (unsigned n = 1;n<1000;n++) {           // bit of a kludge to preven alias clashes
-                aliasLogName.clear().append(logname);
-                if (n>1)
-                    aliasLogName.append(n);
-                aliasLogName.append(".log");
-                Owned<IFile> tmp = createIFile(aliasLogName.str());
-                try {
-                    tmp->remove();
-                    if (!tmp->exists())
-                        break;
-                }
-                catch(IException *e) {
-                    e->Release();
-                }
-            }
-            fileMsgHandler.setown(getRollingFileLogMsgHandler(logname.str(), ".log", rawlog?MSGFIELD_prefix:MSGFIELD_STANDARD, false, true, NULL, aliasLogName.str()));
         }
-        if (fileMsgHandler.get())
-            queryLogMsgManager()->addMonitorOwn(fileMsgHandler.getClear(), getCategoryLogMsgFilter(MSGAUD_all, MSGCLS_all, TopDetail));
         // set stdout 
         attachStandardHandleLogMsgMonitor(stdout,0,MSGAUD_all,MSGCLS_all&~(MSGCLS_disaster|MSGCLS_error|MSGCLS_warning));
         Owned<ILogMsgFilter> filter = getCategoryLogMsgFilter(MSGAUD_user, MSGCLS_error|MSGCLS_warning);

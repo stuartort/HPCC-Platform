@@ -1,5 +1,18 @@
 /*##############################################################################
-Copyright (C) 2011 HPCC Systems.
+
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #include <stdio.h>
@@ -14,12 +27,6 @@ Copyright (C) 2011 HPCC Systems.
 #include "eclcmd.hpp"
 #include "eclcmd_common.hpp"
 #include "eclcmd_core.hpp"
-
-#define ECLOPT_PACKAGEMAP "--packagemap"
-#define ECLOPT_OVERWRITE "--overwrite"
-#define ECLOPT_PACKAGE "--packagename"
-#define ECLOPT_DALIIP "--daliip"
-#define ECLOPT_PROCESS "--process"
 
 //=========================================================================================
 
@@ -57,17 +64,17 @@ public:
             const char *arg = iter.query();
             if (*arg!='-')
             {
-                if (optQuerySetName.isEmpty())
-                    optQuerySetName.set(arg);
+                if (!optTarget.length())
+                    optTarget.set(arg);
+                else if (!optPackageMap.length())
+                    optPackageMap.set(arg);
                 else
                 {
-                    fprintf(stderr, "\nargument is already defined %s\n", arg);
-                    return false;
+                    fprintf(stderr, "\nunrecognized argument %s\n", arg);
+                    return EclCmdOptionCompletion;
                 }
                 continue;
             }
-            if (iter.matchOption(optPackageMap, ECLOPT_PACKAGEMAP))
-                continue;
             if (EclCmdCommon::matchCommandLineOption(iter, true)!=EclCmdOptionMatch)
                 return false;
         }
@@ -77,13 +84,18 @@ public:
     {
         if (!EclCmdCommon::finalizeOptions(globals))
             return false;
-        if (optQuerySetName.isEmpty())
+        if (optTarget.isEmpty())
         {
-            fprintf(stdout, "\n ... Missing query set name\n\n");
+            fprintf(stdout, "\n ... Missing target name\n\n");
             usage();
             return false;
         }
-
+        if (optPackageMap.isEmpty())
+        {
+            fprintf(stdout, "\n ... Missing package map name\n\n");
+            usage();
+            return false;
+        }
         return true;
     }
     virtual int processCMD()
@@ -91,8 +103,8 @@ public:
         Owned<IClientWsPackageProcess> packageProcessClient = getWsPackageSoapService(optServer, optPort, optUsername, optPassword);
 
         Owned<IClientActivatePackageRequest> request = packageProcessClient->createActivatePackageRequest();
-        request->setPackageName(optQuerySetName);
-        request->setPackageMapName(optPackageMap);
+        request->setTarget(optTarget);
+        request->setPackageMap(optPackageMap);
 
         Owned<IClientActivatePackageResponse> resp = packageProcessClient->ActivatePackage(request);
         if (resp->getExceptions().ordinality())
@@ -102,16 +114,21 @@ public:
     }
     virtual void usage()
     {
-        fprintf(stdout,"\nUsage:\n\n"
-            "ecl package activate [options] [<querySetName>]\n\n"
-            "   Options:\n"
-            "      --packagemap=<packagemap>        name of packagemap to update\n"
-        );
+        fputs("\nUsage:\n"
+                    "\n"
+                    "The 'activate' command will deactivate the currently activate packagemap \n"
+                    "and make the specified packagemap the one that is used.\n"
+                    "\n"
+                    "ecl packagemap activate <target> <packagemap>\n"
+                    " Options:\n"
+                    "   <target>               name of target containing package map to activate\n"
+                    "   <packagemap>           packagemap to activate\n",
+                    stdout);
         EclCmdCommon::usage();
     }
 private:
 
-    StringAttr optQuerySetName;
+    StringAttr optTarget;
     StringAttr optPackageMap;
 };
 
@@ -134,27 +151,19 @@ public:
             const char *arg = iter.query();
             if (*arg!='-')
             {
-                if (optQuerySetName.isEmpty())
-                    optQuerySetName.set(arg);
+                if (!optTarget.length())
+                    optTarget.set(arg);
+                else if (!optPackageMap.length())
+                    optPackageMap.set(arg);
                 else
                 {
-                    fprintf(stderr, "\nargument is already defined %s\n", arg);
-                    return false;
+                    fprintf(stderr, "\nunrecognized argument %s\n", arg);
+                    return EclCmdOptionCompletion;
                 }
                 continue;
             }
-            if (iter.matchOption(optPackageMap, ECLOPT_PACKAGEMAP))
-                continue;
-            switch (EclCmdCommon::matchCommandLineOption(iter))
-            {
-                case EclCmdOptionNoMatch:
-                    fprintf(stderr, "\n%s option not recognized\n", arg);
-                    return false;
-                case EclCmdOptionCompletion:
-                    return false;
-                case EclCmdOptionMatch:
-                    break;
-            }
+            if (EclCmdCommon::matchCommandLineOption(iter, true)!=EclCmdOptionMatch)
+                return false;
         }
         return true;
     }
@@ -162,9 +171,15 @@ public:
     {
         if (!EclCmdCommon::finalizeOptions(globals))
             return false;
-        if (optQuerySetName.isEmpty())
+        if (optTarget.isEmpty())
         {
-            fprintf(stdout, "\n ... Missing query set name\n\n");
+            fprintf(stdout, "\n ... Missing target name\n\n");
+            usage();
+            return false;
+        }
+        if (optPackageMap.isEmpty())
+        {
+            fprintf(stdout, "\n ... Missing package map name\n\n");
             usage();
             return false;
         }
@@ -175,8 +190,8 @@ public:
         Owned<IClientWsPackageProcess> packageProcessClient = getWsPackageSoapService(optServer, optPort, optUsername, optPassword);
 
         Owned<IClientDeActivatePackageRequest> request = packageProcessClient->createDeActivatePackageRequest();
-        request->setPackageName(optQuerySetName);
-        request->setPackageMapName(optPackageMap);
+        request->setTarget(optTarget);
+        request->setPackageMap(optPackageMap);
 
         Owned<IClientDeActivatePackageResponse> resp = packageProcessClient->DeActivatePackage(request);
         if (resp->getExceptions().ordinality())
@@ -186,16 +201,20 @@ public:
     }
     virtual void usage()
     {
-        fprintf(stdout,"\nUsage:\n\n"
-            "ecl package deactivate [options] [<querySetName>]\n\n"
-            "   Options:\n"
-            "      --packagemap=<packagemap>        name of packagemap to update\n"
-        );
+        fputs("\nUsage:\n"
+                    "\n"
+                    "The 'deactivate' command will deactivate the currently activate packagemap \n"
+                    "\n"
+                    "ecl packagemap deactivate <target> <packagemap>\n"
+                    " Options:\n"
+                    "   <target>               name of target containing package map to activate\n"
+                    "   <packagemap>           packagemap to activate\n",
+                    stdout);
         EclCmdCommon::usage();
     }
 private:
 
-    StringAttr optQuerySetName;
+    StringAttr optTarget;
     StringAttr optPackageMap;
 };
 
@@ -218,19 +237,15 @@ public:
             const char *arg = iter.query();
             if (*arg!='-')
             {
-                if (optCluster.isEmpty())
-                    optCluster.set(arg);
+                if (optTarget.isEmpty())
+                    optTarget.set(arg);
                 else
                 {
-                    fprintf(stderr, "\nargument is already defined %s\n", arg);
-                    return false;
+                    fprintf(stderr, "\nunrecognized argument %s\n", arg);
+                    return EclCmdOptionCompletion;
                 }
                 continue;
             }
-            if (iter.matchOption(optCluster, ECLOPT_CLUSTER))
-                continue;
-            if (EclCmdCommon::matchCommandLineOption(iter, true)!=EclCmdOptionMatch)
-                return false;
         }
         return true;
     }
@@ -238,9 +253,9 @@ public:
     {
         if (!EclCmdCommon::finalizeOptions(globals))
             return false;
-        if (optCluster.isEmpty())
+        if (optTarget.isEmpty())
         {
-            fprintf(stderr, "\nCluster must be specified\n");
+            fprintf(stderr, "\nTarget cluster must be specified\n");
             usage();
             return false;
         }
@@ -251,7 +266,7 @@ public:
         Owned<IClientWsPackageProcess> packageProcessClient = getWsPackageSoapService(optServer, optPort, optUsername, optPassword);
 
         Owned<IClientListPackageRequest> request = packageProcessClient->createListPackageRequest();
-        request->setCluster(optCluster);
+        request->setTarget(optTarget);
 
         Owned<IClientListPackageResponse> resp = packageProcessClient->ListPackage(request);
         if (resp->getExceptions().ordinality())
@@ -285,16 +300,19 @@ public:
     }
     virtual void usage()
     {
-        fprintf(stdout,"\nUsage:\n\n"
-            "ecl package list [options] \n\n"
-            "   Options:\n"
-            "      [--cluster<cluster>   name of cluster to retrieve package information.  Defaults to all package information stored in dali\n"
-        );
+        fputs("\nUsage:\n"
+                    "\n"
+                    "The 'list' command will list package map information for the target cluster \n"
+                    "\n"
+                    "ecl packagemap list <target> \n"
+                    " Options:\n"
+                    "   <target>               name of target containing package map to use when retrieve list of package maps\n",
+                    stdout);
         EclCmdCommon::usage();
     }
 private:
 
-    StringAttr optCluster;
+    StringAttr optTarget;
 };
 
 class EclCmdPackageInfo: public EclCmdCommon
@@ -316,40 +334,25 @@ public:
             const char *arg = iter.query();
             if (*arg!='-')
             {
-                if (optPkgName.isEmpty())
-                    optPkgName.set(arg);
+                if (optTarget.isEmpty())
+                    optTarget.set(arg);
                 else
                 {
-                    fprintf(stderr, "\nargument is already defined %s\n", arg);
-                    return false;
+                    fprintf(stderr, "\nunrecognized argument %s\n", arg);
+                    return EclCmdOptionCompletion;
                 }
                 continue;
             }
-            else if (iter.matchOption(optCluster, ECLOPT_CLUSTER))
-                continue;
-            else if (iter.matchOption(optPkgName, ECLOPT_PACKAGE))
-                continue;
-            if (EclCmdCommon::matchCommandLineOption(iter, true)!=EclCmdOptionMatch)
-                return false;
         }
         return true;
     }
     virtual bool finalizeOptions(IProperties *globals)
     {
         if (!EclCmdCommon::finalizeOptions(globals))
-        {
-            usage();
             return false;
-        }
-        StringBuffer err;
-        if (!optPkgName.isEmpty() && !optCluster.isEmpty())
-            err.append("\n ... Specify either a cluster name of a package name, but NOT both\n\n");
-        else if (optPkgName.isEmpty() && optCluster.isEmpty())
-            err.append("\n ... Specify either a cluster name of a package name\n\n");
-
-        if (err.length())
+        if (optTarget.isEmpty())
         {
-            fprintf(stdout, "%s", err.str());
+            fprintf(stderr, "\nTarget cluster must be specified\n");
             usage();
             return false;
         }
@@ -360,8 +363,7 @@ public:
         Owned<IClientWsPackageProcess> packageProcessClient = getWsPackageSoapService(optServer, optPort, optUsername, optPassword);
 
         Owned<IClientGetPackageRequest> request = packageProcessClient->createGetPackageRequest();
-        request->setPackageName(optPkgName);
-        request->setCluster(optCluster);
+        request->setTarget(optTarget);
 
         Owned<IClientGetPackageResponse> resp = packageProcessClient->GetPackage(request);
         if (resp->getExceptions().ordinality())
@@ -372,17 +374,19 @@ public:
     }
     virtual void usage()
     {
-        fprintf(stdout,"\nUsage:\n\n"
-            "ecl package info [options] [<packageName>]\n\n"
-            "   Options:\n"
-            "      [--cluster=<cluster> | --packageName=<packageName>]  specify either a cluster name or a pacakge name to retrieve information\n"
-        );
+        fputs("\nUsage:\n"
+                    "\n"
+                    "The 'info' command will return the contents of the active package map information for the target cluster \n"
+                    "\n"
+                    "ecl packagemap info <target> \n"
+                    " Options:\n"
+                    "   <target>               name of the target to use when retrieving active package map information\n",
+                    stdout);
         EclCmdCommon::usage();
     }
 private:
 
-    StringAttr optPkgName;
-    StringAttr optCluster;
+    StringAttr optTarget;
 };
 
 class EclCmdPackageDelete : public EclCmdCommon
@@ -404,17 +408,17 @@ public:
             const char *arg = iter.query();
             if (*arg!='-')
             {
-                if (optFileName.isEmpty())
-                    optFileName.set(arg);
+                if (!optTarget.length())
+                    optTarget.set(arg);
+                else if (!optPackageMap.length())
+                    optPackageMap.set(arg);
                 else
                 {
-                    fprintf(stderr, "\nargument is already defined %s\n", arg);
-                    return false;
+                    fprintf(stderr, "\nunrecognized argument %s\n", arg);
+                    return EclCmdOptionCompletion;
                 }
                 continue;
             }
-            if (iter.matchOption(optQuerySet, ECLOPT_QUERYSET))
-                continue;
             if (EclCmdCommon::matchCommandLineOption(iter, true)!=EclCmdOptionMatch)
                 return false;
         }
@@ -428,10 +432,10 @@ public:
             return false;
         }
         StringBuffer err;
-        if (optFileName.isEmpty())
-            err.append("\n ... Missing package file name\n\n");
-        else if (optQuerySet.isEmpty())
-            err.append("\n ... Specify either a cluster name of a package name\n\n");
+        if (optPackageMap.isEmpty())
+            err.append("\n ... Missing package map name\n\n");
+        else if (optTarget.isEmpty())
+            err.append("\n ... Specify a target cluster name\n\n");
 
         if (err.length())
         {
@@ -445,11 +449,11 @@ public:
     {
         Owned<IClientWsPackageProcess> packageProcessClient = getWsPackageSoapService(optServer, optPort, optUsername, optPassword);
 
-        fprintf(stdout, "\n ... deleting package %s now\n\n", optFileName.sget());
+        fprintf(stdout, "\n ... deleting package map %s now\n\n", optPackageMap.sget());
 
         Owned<IClientDeletePackageRequest> request = packageProcessClient->createDeletePackageRequest();
-        request->setQuerySet(optQuerySet);
-        request->setPackageName(optFileName);
+        request->setTarget(optTarget);
+        request->setPackageMap(optPackageMap);
 
         Owned<IClientDeletePackageResponse> resp = packageProcessClient->DeletePackage(request);
         if (resp->getExceptions().ordinality())
@@ -461,21 +465,21 @@ public:
     virtual void usage()
     {
         fprintf(stdout,"\nUsage:\n\n"
-            "ecl package delete [options] [<filename>]\n\n"
+            "ecl packagemap delete [options] [<filename>]\n\n"
             "   Options:\n"
             "      --queryset=<queryset>        name of queryset to associate the information\n"
         );
         EclCmdCommon::usage();
     }
 private:
-    StringAttr optFileName;
-    StringAttr optQuerySet;
+    StringAttr optPackageMap;
+    StringAttr optTarget;
 };
 
 class EclCmdPackageAdd : public EclCmdCommon
 {
 public:
-    EclCmdPackageAdd() : optActivate(true), optOverWrite(true)
+    EclCmdPackageAdd() : optActivate(false), optOverWrite(false)
     {
     }
     virtual bool parseCommandLineOptions(ArgvIterator &iter)
@@ -491,20 +495,20 @@ public:
             const char *arg = iter.query();
             if (*arg!='-')
             {
-                if (optFileName.isEmpty())
+                if (optTarget.isEmpty())
+                    optTarget.set(arg);
+                else if (optFileName.isEmpty())
                     optFileName.set(arg);
                 else
                 {
-                    fprintf(stderr, "\nargument is already defined %s\n", arg);
-                    return false;
+                    fprintf(stderr, "\nunrecognized argument %s\n", arg);
+                    return EclCmdOptionCompletion;
                 }
                 continue;
             }
-            if (iter.matchOption(optQuerySet, ECLOPT_QUERYSET))
+            if (iter.matchFlag(optActivate, ECLOPT_ACTIVATE)||iter.matchFlag(optActivate, ECLOPT_ACTIVATE_S))
                 continue;
-            if (iter.matchFlag(optActivate, ECLOPT_ACTIVATE))
-                continue;
-            if (iter.matchFlag(optOverWrite, ECLOPT_OVERWRITE))
+            if (iter.matchFlag(optOverWrite, ECLOPT_OVERWRITE)||iter.matchFlag(optOverWrite, ECLOPT_OVERWRITE_S))
                 continue;
             if (EclCmdCommon::matchCommandLineOption(iter, true)!=EclCmdOptionMatch)
                 return false;
@@ -521,8 +525,8 @@ public:
         StringBuffer err;
         if (optFileName.isEmpty())
             err.append("\n ... Missing package file name\n\n");
-        else if (optQuerySet.isEmpty())
-            err.append("\n ... Specify either a cluster name of a package name\n\n");
+        else if (optTarget.isEmpty())
+            err.append("\n ... Specify a cluster name\n\n");
 
         if (err.length())
         {
@@ -530,6 +534,10 @@ public:
             usage();
             return false;
         }
+
+        if (optProcess.isEmpty())
+            optProcess.set("*");
+
         return true;
     }
     virtual int processCMD()
@@ -538,14 +546,14 @@ public:
         StringBuffer pkgInfo;
         pkgInfo.loadFile(optFileName);
 
-        fprintf(stdout, "\n ... adding package %s now\n\n", optFileName.sget());
+        fprintf(stdout, "\n ... adding package map %s now\n\n", optFileName.sget());
 
         Owned<IClientAddPackageRequest> request = packageProcessClient->createAddPackageRequest();
         request->setActivate(optActivate);
         request->setInfo(pkgInfo);
-        request->setQuerySet(optQuerySet);
-        request->setPackageName(optFileName);
-        request->setOverWrite(optOverWrite);
+        request->setTarget(optTarget);
+        request->setPackageMap(optFileName);
+        request->setProcess(optProcess);
 
         Owned<IClientAddPackageResponse> resp = packageProcessClient->AddPackage(request);
         if (resp->getExceptions().ordinality())
@@ -556,18 +564,25 @@ public:
 
     virtual void usage()
     {
-        fprintf(stdout,"\nUsage:\n\n"
-            "ecl package add [options] [<filename>]\n\n"
-            "   Options:\n"
-            "      --queryset=<queryset>        name of queryset to associate the information\n"
-            "      --overwritename=<true/false> overwrite existing information - defaults to true\n"
-            "      --activate=<true/false>      activate the package information - defaults to true\n"
-        );
+        fputs("\nUsage:\n"
+                    "\n"
+                    "The 'add' command will add the package map information to dali \n"
+                    "\n"
+                    "ecl packagemap add [options] <target> <filename>\n"
+                    " Options:\n"
+                    "   -O, --overwrite             overwrite existing information\n"
+                    "   -A, --activate              activate the package information\n"
+// NOT-YET          "  --packageprocessname         if not set use this package process name for all clusters"
+                    "   <target>                    name of target to use when adding package map information\n"
+                    "   <filename>                  name of file containing package map information\n",
+                    stdout);
+
         EclCmdCommon::usage();
     }
 private:
     StringAttr optFileName;
-    StringAttr optQuerySet;
+    StringAttr optTarget;
+    StringAttr optProcess;
     bool optActivate;
     bool optOverWrite;
     StringBuffer pkgInfo;
@@ -604,8 +619,6 @@ public:
                 }
                 continue;
             }
-            if (iter.matchOption(optProcess, ECLOPT_PROCESS))
-                continue;
             if (iter.matchOption(optDaliIp, ECLOPT_DALIIP))
                 continue;
             if (iter.matchFlag(optOverWrite, ECLOPT_OVERWRITE))
@@ -625,7 +638,7 @@ public:
         StringBuffer err;
         if (optFileName.isEmpty())
             err.append("\n ... Missing package file name\n\n");
-        else if (optProcess.isEmpty())
+        else if (optTarget.isEmpty())
             err.append("\n ... Specify a process name\n\n");
 
         if (err.length())
@@ -646,7 +659,7 @@ public:
 
         Owned<IClientCopyFilesRequest> request = packageProcessClient->createCopyFilesRequest();
         request->setInfo(pkgInfo);
-        request->setProcess(optProcess);
+        request->setTarget(optTarget);
         request->setPackageName(optFileName);
         request->setOverWrite(optOverWrite);
         if (!optDaliIp.isEmpty())
@@ -661,18 +674,24 @@ public:
 
     virtual void usage()
     {
-        fprintf(stdout,"\nUsage:\n\n"
-            "ecl package copyFiles [options] [<filename>]\n\n"
-            "   Options:\n"
-            "      --process=<processcluster>    name of the process cluster to copy files\n"
-            "      --overwrite=<true/false>      overwrite data file if it already exists on the target cluster. defaults to false\n"
-            "      --daliip=<daliip>            ip of the source dali to use for file lookups\n"
-        );
+        fputs("\nUsage:\n"
+                    "\n"
+                    "The 'copyFiles' command will copy any file listed in the package that is not currently \n"
+                    "known on the cluster.  This will NOT load the package information \n"
+                    "\n"
+                    "ecl packagemap copyFiles [options] <target> <filename>\n"
+                    " Options:\n"
+                    "   -O, --overwrite             overwrite existing information\n"
+                    "  --daliip=<daliip>            ip of the source dali to use for file lookups\n"
+                    "   <target>                    name of target to use when adding package information\n"
+                    "   <filename>                  name of file containing package information\n",
+                    stdout);
+
         EclCmdCommon::usage();
     }
 private:
     StringAttr optFileName;
-    StringAttr optProcess;
+    StringAttr optTarget;
     StringAttr optDaliIp;
     StringBuffer pkgInfo;
     bool optOverWrite;
@@ -712,15 +731,15 @@ public:
     virtual void usage()
     {
         fprintf(stdout,"\nUsage:\n\n"
-            "ecl package <command> [command options]\n\n"
-            "   Package Commands:\n"
-            "      add          add a package to the environment\n"
+            "ecl packagemap <command> [command options]\n\n"
+            "   packagemap Commands:\n"
+            "      add          add a package map to the environment\n"
             "      copyFiles    copy missing data files to the appropriate cluster\n"
-            "      delete       delete a package\n"
-            "      activate     activate a package\n"
-            "      deactivate   deactivate a package (package will not get loaded)\n"
-            "      list         list loaded package names\n"
-            "      info         return active package information for a cluster\n"
+            "      delete       delete a packag emap\n"
+            "      activate     activate a package map\n"
+            "      deactivate   deactivate a package map (package map will not get loaded)\n"
+            "      list         list loaded package map names\n"
+            "      info         return active package map information for a cluster\n"
         );
     }
 };

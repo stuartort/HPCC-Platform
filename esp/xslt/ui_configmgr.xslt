@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 ##############################################################################
-#    Copyright (C) 2011 HPCC Systems.
+#    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 #
-#    All rights reserved. This program is free software: you can redistribute it and/or modify
-#    it under the terms of the GNU Affero General Public License as
-#    published by the Free Software Foundation, either version 3 of the
-#    License, or (at your option) any later version.
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
 #
-#    This program is distributed in the hope that it will be useful,
-#    but WITHOUT ANY WARRANTY; without even the implied warranty of
-#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#    GNU Affero General Public License for more details.
+#       http://www.apache.org/licenses/LICENSE-2.0
 #
-#    You should have received a copy of the GNU Affero General Public License
-#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License.
 ##############################################################################
 -->
 
@@ -29,7 +28,27 @@
       <xsl:otherwise>/esp/files_</xsl:otherwise>
     </xsl:choose>
   </xsl:variable>
-  
+
+<xsl:template name="string-replace-all">
+  <xsl:param name="text" />
+  <xsl:param name="replace" />
+  <xsl:param name="by" />
+  <xsl:choose>
+    <xsl:when test="contains($text, $replace)">
+      <xsl:value-of select="substring-before($text,$replace)" />
+      <xsl:value-of select="$by" />
+      <xsl:call-template name="string-replace-all">
+        <xsl:with-param name="text" select="substring-after($text,$replace)" />
+        <xsl:with-param name="replace" select="$replace" />
+        <xsl:with-param name="by" select="$by" />
+      </xsl:call-template>
+    </xsl:when>
+    <xsl:otherwise>
+      <xsl:value-of select="$text" />
+    </xsl:otherwise>
+  </xsl:choose>
+</xsl:template>
+
   <xsl:template match="/*[1]/XmlArgs/*">
           <html>
             <head>
@@ -199,8 +218,10 @@
               <i>
                 <h3>
                   <script type="text/javascript">
-                    <!--document.body.style.cursor='wait';-->
-                    document.write('<xsl:value-of select="$Component"/>');
+                    if (top.document.navDT.getRecordIndex(top.document.navDT.getSelectedRows()[0]) == 0)
+                      document.write("XML View");
+                    else
+                      document.write('<xsl:value-of select="$Component"/>');
                   </script>
                 </h3>
               </i>
@@ -424,7 +445,14 @@
                     i.compType = '<xsl:value-of select="@name"/>';
                     i.depth = <xsl:value-of select="count(ancestor::*) - 2"/>;
                     i.name = '<xsl:value-of select="name()"/>';
-                    i.value = "<xsl:value-of select="normalize-space(text())"/>";
+                    <xsl:variable name="value_quote">
+                      <xsl:call-template name="string-replace-all">
+                        <xsl:with-param name="text" select="normalize-space(text())"/>
+                        <xsl:with-param name="replace" select="'&quot;'" />
+                        <xsl:with-param name="by" select="'\&quot;'" />
+                      </xsl:call-template>
+                    </xsl:variable>
+                    i.value = "<xsl:value-of select="$value_quote"/>";
                     i.parent = parentIds[parentIds.length-1];
                     parent = id;
                     i.id = id++;
@@ -438,7 +466,14 @@
                       i.compType = '<xsl:value-of select="$Component"/>';
                       i.depth = <xsl:value-of select="count(ancestor::*) - 1"/>;
                       i.name = "<xsl:value-of select="name()"/>";
-                      i.value = "<xsl:value-of select="."/>";
+                      <xsl:variable name="value">
+                        <xsl:call-template name="string-replace-all">
+                          <xsl:with-param name="text" select="."/>
+                          <xsl:with-param name="replace" select="'\'" />
+                          <xsl:with-param name="by" select="'\\'" />
+                        </xsl:call-template>
+                      </xsl:variable>
+                      i.value = "<xsl:value-of select="$value" />";
                       i.parent = parentIds[parentIds.length-1];
                       i.params = "parentParams" + i.depth + "=" + rows[i.parent].params;
                       i.id = id++;

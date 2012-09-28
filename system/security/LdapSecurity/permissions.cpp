@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #pragma warning(disable:4786)
@@ -788,6 +787,7 @@ bool MakeAbsoluteSD(PSECURITY_DESCRIPTOR pSelfRelativeSecurityDescriptor,
     if(*lpdwAbsoluteSecurityDescriptorSize < sizeof(SECURITY_DESCRIPTOR))
     {
         ok = false;
+        DBGLOG("MakeAbsoluteSD : pdwAbsoluteSecurityDescriptorSize < sizeof(SECURITY_DESCRIPTOR)");
         *lpdwAbsoluteSecurityDescriptorSize = sizeof(SECURITY_DESCRIPTOR);
     }
 
@@ -800,6 +800,7 @@ bool MakeAbsoluteSD(PSECURITY_DESCRIPTOR pSelfRelativeSecurityDescriptor,
         if(*lpdwOwnerSize < owner_size)
         {
             ok = false;
+            DBGLOG("MakeAbsoluteSD : *lpdwOwnerSize < owner_size");
             *lpdwOwnerSize = owner_size;
         }
     }
@@ -813,6 +814,7 @@ bool MakeAbsoluteSD(PSECURITY_DESCRIPTOR pSelfRelativeSecurityDescriptor,
         if(*lpdwPrimaryGroupSize < group_size)
         {
             ok = false;
+            DBGLOG("MakeAbsoluteSD : *lpdwPrimaryGroupSize < group_size");
             *lpdwPrimaryGroupSize = group_size;
         }
     }
@@ -826,6 +828,7 @@ bool MakeAbsoluteSD(PSECURITY_DESCRIPTOR pSelfRelativeSecurityDescriptor,
         if(*lpdwDaclSize < DaclSizeInfo.AclBytesInUse)
         {
             ok = false;
+            DBGLOG("MakeAbsoluteSD : *lpdwDaclSize < DaclSizeInfo.AclBytesInUse");
             *lpdwDaclSize = DaclSizeInfo.AclBytesInUse;
         }
     }
@@ -839,6 +842,7 @@ bool MakeAbsoluteSD(PSECURITY_DESCRIPTOR pSelfRelativeSecurityDescriptor,
         if(*lpdwSaclSize < SaclSizeInfo.AclBytesInUse)
         {
             ok = false;
+            DBGLOG("MakeAbsoluteSD : *lpdwSaclSize < SaclSizeInfo.AclBytesInUse");
             *lpdwSaclSize = SaclSizeInfo.AclBytesInUse;
         }
     }
@@ -848,7 +852,7 @@ bool MakeAbsoluteSD(PSECURITY_DESCRIPTOR pSelfRelativeSecurityDescriptor,
         return false;
     }
     
-    if(pAbsoluteSecurityDescriptor ==  NULL)
+    if(pAbsoluteSecurityDescriptor == NULL)
     {
         DBGLOG("MakeAbsoluteSD : pAbsoluteSecurityDescriptor is NULL");
         return false;
@@ -1313,8 +1317,12 @@ CSecurityDescriptor* PermissionProcessor::changePermission(CSecurityDescriptor* 
     rc = MakeAbsoluteSD(pisd, psd, &sd_size, pdacl, &dacl_size, psacl, &sacl_size, owner, &owner_size, pgroup, &pgroup_size);
     if(rc == 0)
     {
+#ifdef _WIN32
         int error = GetLastError();
         throw MakeStringException(-1, "Error MakeAbsoluteSD - error code = %d", error);
+#else
+        throw MakeStringException(-1, "Error MakeAbsoluteSD");
+#endif
     }
 
     bool done = false;
@@ -1471,6 +1479,7 @@ CSecurityDescriptor* PermissionProcessor::createDefaultSD(ISecUser& user, const 
         MemoryBuffer umb, gmb;
         if(&user != NULL && DEFAULT_OWNER_PERMISSION != SecAccess_None)
         {
+            //Add SD for given user
             lookupSid(user.getName(), umb);
             psid = (PSID)(umb.toByteArray());
             if(psid != NULL)
@@ -1484,8 +1493,9 @@ CSecurityDescriptor* PermissionProcessor::createDefaultSD(ISecUser& user, const 
             }
         }
 
-        if(DEFAULT_AUTHENTICATED_USERS_PERMISSION != SecAccess_None)
+        if(ptype != PT_ADMINISTRATORS_AND_USER  &&  DEFAULT_AUTHENTICATED_USERS_PERMISSION != SecAccess_None)
         {
+            //Add SD for Authenticated users
             au_psid = (PSID)(authenticated_users_sid);
             unsigned permission = sec2ldap(DEFAULT_AUTHENTICATED_USERS_PERMISSION);
             rc = AddAccessAllowedAce(pacl, ACL_REVISION, permission, au_psid);
@@ -1537,8 +1547,13 @@ CSecurityDescriptor* PermissionProcessor::createDefaultSD(ISecUser& user, ISecRe
     rc = MakeAbsoluteSD(pisd, psd, &sd_size, pdacl, &dacl_size, psacl, &sacl_size, owner, &owner_size, pgroup, &pgroup_size);
     if(rc == 0)
     {
+#ifdef _WIN32
         int error = GetLastError();
         throw MakeStringException(-1, "Error MakeAbsoluteSD - error code = %d", error);
+#else
+        throw MakeStringException(-1, "Error MakeAbsoluteSD");
+#endif
+
     }
 
     PSID user_psid;

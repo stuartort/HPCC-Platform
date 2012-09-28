@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 -->
 
 <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
@@ -47,12 +46,13 @@
             showPreflightControl(method);
             var cbGetSoftwareInfo = document.getElementById("GetSoftwareInfo");
             onGetSoftwareInfo(cbGetSoftwareInfo);            
+            onGetStorageInfo(document.getElementById("GetStorageInfo"));
          }
          
          function reloadPage() {
              document.forms['listitems'].submit();
          }
-                  
+
          function setReloadTimeout(mins) {
              if (reloadTimeout != mins && allowReloadPage) {
                 if (reloadTimer) {              
@@ -87,31 +87,30 @@
          {
           if (!fromTargetClusterPage)
           {
-            if ((name=='Start') || (name=='Stop'))
-              method = name;   
-            else
-                    document.forms['listitems'].action = '/ws_machine/' + name;
+             if ((name=='Start') || (name=='Stop'))
+                method = name;
+             else
+                document.forms['listitems'].action = '/ws_machine/' + name;
 
-            var c = document.forms['listitems'].all;
-            if (name != 'GetMachineInfo')
-               c['GetMachineInfo'].style.display="none";
-               
-            if (name != 'GetMetrics' && c['GetMetrics'] != undefined)
-               c['GetMetrics'].style.display="none";
-            
-            if (name != 'RemoteExec')
-               c['RemoteExec'].style.display="none";
-                  
-            if (name != 'Start' && name != 'Stop')
-               c['StartStop'].style.display="none";
-                  
-            c['AutoRefreshSection'].style.display= name == "GetMachineInfo" ? "block" : "none";
-            if (name!='Start' && name!='Stop')
-               c[name].style.display='block';
-                    else
-               c['StartStop'].style.display='block';
+             if (name != 'GetMachineInfo')
+                document.getElementById('GetMachineInfo').style.display="none";
 
-            method = name;
+             if (name != 'GetMetrics' && document.getElementById('GetMetrics') != undefined)
+                document.getElementById('GetMetrics').style.display="none";
+
+             if (name != 'RemoteExec')
+                document.getElementById('RemoteExec').style.display="none";
+                  
+             if (name != 'Start' && name != 'Stop')
+                document.getElementById('StartStop').style.display="none";
+
+             document.getElementById('AutoRefreshSection').style.display= name == "GetMachineInfo" ? "block" : "none";
+             if (name!='Start' && name!='Stop')
+                document.getElementById(name).style.display='block';
+             else
+                document.getElementById('StartStop').style.display='block';
+
+             method = name;
           }
           else
           {
@@ -132,6 +131,11 @@
               }
             }
          } 
+
+         function onGetStorageInfo(cb)
+         {
+            document.getElementById("LocalFileSystemsOnly").disabled = !cb.checked;
+         }
          
          function onGetSoftwareInfo(cb)
          {
@@ -299,6 +303,7 @@
     <xsl:param name="getProcessorInfo" select="1"/>
     <xsl:param name="getSoftwareInfo" select="1"/>
     <xsl:param name="getStorageInfo" select="1"/>
+    <xsl:param name="localFileSystemsOnly" select="1"/>
     <xsl:param name="applyProcessFilter" select="1"/>
     <xsl:param name="addProcessesToFilter"/>
     <xsl:param name="enableSNMP"/>
@@ -385,7 +390,7 @@
                 </tr>
                 <tr>
                     <td>
-                        <input type="checkbox" name="GetStorageInfo" align="left" value="1">
+                        <input type="checkbox" id="GetStorageInfo" name="GetStorageInfo" align="left" value="1" onclick="onGetStorageInfo(this)">
                             <xsl:if test="$getStorageInfo">
                                 <xsl:attribute name="checked"/>
                             </xsl:if>
@@ -409,6 +414,15 @@
                                 <xsl:text>MB</xsl:text>
                             </option>
                         </select>
+                    </td>
+                </tr>
+                <tr>
+                    <td col="2" align="center">
+                        <input type="checkbox" id="LocalFileSystemsOnly" name="LocalFileSystemsOnly" value="1">
+                            <xsl:if test="$localFileSystemsOnly">
+                                <xsl:attribute name="checked"/>
+                            </xsl:if>
+                        </input><xsl:text>Local File Systems Only</xsl:text>
                     </td>
                 </tr>
                 <tr>

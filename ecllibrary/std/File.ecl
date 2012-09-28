@@ -1,5 +1,5 @@
 /*##############################################################################
-## Copyright (c) 2011 HPCC Systems.  All rights reserved.
+## HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.  All rights reserved.
 ############################################################################## */
 
 EXPORT File := MODULE
@@ -171,7 +171,7 @@ EXPORT dataset(FsFilenameRecord) RemoteDirectory(varstring machineIP, varstring 
  * Removes a dataset of information about the logical files known to the the system.
  * 
  * @param namepattern   The mask of the files to list. Defaults to '*' (all files).
- * @param includenormal Whether to include “normal” files. Defaults to TRUE.
+ * @param includenormal Whether to include ï¿½normalï¿½ files. Defaults to TRUE.
  * @param includesuper  Whether to include SuperFiles. Defaults to FALSE.
  * @param unknownszero  Whether to set file sizes that are unknown to zero(0) instead of minus-one (-1). Defaults to FALSE.
  * @param foreigndali   The IP address of the foreign dali used to resolve the file.  If blank then the file is resolved
@@ -226,7 +226,7 @@ EXPORT varstring VerifyFile(varstring lfn, boolean usecrcs) :=
  *                      indicates the secondary is an INDEX that must use FETCH to access non-keyed fields.
  * @param secondaryfields The name of the foreign key field relating to the primary file.
  * @param relationship  The type of relationship between the primary and secondary files.
- *                      Containing either “link” or “view”.  Default is "link".
+ *                      Containing either ï¿½linkï¿½ or ï¿½viewï¿½.  Default is "link".
  * @param cardinality   The cardinality of the relationship.  The format is <primary>:<secondary>. Valid values are
  *                      "1" or "M".
  * @param payload       Indicates whether the primary or secondary are payload INDEXes.
@@ -244,7 +244,7 @@ EXPORT AddFileRelationship(varstring primary, varstring secondary, varstring pri
  * @param primaryfields The name of the primary key field for the primary file.
  * @param secondaryfields The name of the foreign key field relating to the primary file.
  * @param relationship  The type of relationship between the primary and secondary files.
- *                      Containing either “link” or “view”.  Default is "link".
+ *                      Containing either ï¿½linkï¿½ or ï¿½viewï¿½.  Default is "link".
  */
 
 EXPORT dataset(FsFileRelationshipRecord) FileRelationshipList(varstring primary, varstring secondary, varstring primflds='', varstring secondaryflds='',  varstring kind='link') :=
@@ -258,7 +258,7 @@ EXPORT dataset(FsFileRelationshipRecord) FileRelationshipList(varstring primary,
  * @param primaryfields The name of the primary key field for the primary file.
  * @param secondaryfields The name of the foreign key field relating to the primary file.
  * @param relationship  The type of relationship between the primary and secondary files.
- *                      Containing either “link” or “view”.  Default is "link".
+ *                      Containing either ï¿½linkï¿½ or ï¿½viewï¿½.  Default is "link".
  */
 
 EXPORT RemoveFileRelationship(varstring primary,  varstring secondary, varstring primaryflds='', varstring secondaryflds='',  varstring kind='link') :=
@@ -383,11 +383,11 @@ EXPORT varstring fDespray(varstring logicalName, varstring destinationIP, varstr
 EXPORT varstring fCopy(varstring sourceLogicalName, varstring destinationGroup, varstring destinationLogicalName, varstring sourceDali='', integer4 timeOut=-1, varstring espServerIpPort=GETENV('ws_fs_server'), integer4 maxConnections=-1, boolean allowoverwrite=false, boolean replicate=false, boolean asSuperfile=false, boolean compress=false, boolean forcePush=false, integer4 transferBufferSize=0) :=
     lib_fileservices.FileServices.fCopy(sourceLogicalName, destinationGroup, destinationLogicalName, sourceDali, timeOut, espServerIpPort, maxConnections, allowoverwrite, replicate, asSuperfile, compress, forcePush, transferBufferSize);
 
-EXPORT varstring fMonitorLogicalFileName(varstring eventname, varstring name, integer4 shotcount=1, varstring espServerIpPort=GETENV('ws_fs_server')) :=
-    lib_fileservices.FileServices.fMonitorLogicalFileName(eventname, name, shotcount, espServerIpPort);
+EXPORT varstring fMonitorLogicalFileName(varstring event_name, varstring name, integer4 shotcount=1, varstring espServerIpPort=GETENV('ws_fs_server')) :=
+    lib_fileservices.FileServices.fMonitorLogicalFileName(event_name, name, shotcount, espServerIpPort);
 
-EXPORT varstring fMonitorFile(varstring eventname, varstring ip, varstring filename, boolean subdirs=false, integer4 shotcount=1, varstring espServerIpPort=GETENV('ws_fs_server')) :=
-    lib_fileservices.FileServices.fMonitorFile(eventname, ip, filename, subdirs, shotcount, espServerIpPort);
+EXPORT varstring fMonitorFile(varstring event_name, varstring ip, varstring filename, boolean subdirs=false, integer4 shotcount=1, varstring espServerIpPort=GETENV('ws_fs_server')) :=
+    lib_fileservices.FileServices.fMonitorFile(event_name, ip, filename, subdirs, shotcount, espServerIpPort);
 
 EXPORT varstring fReplicate(varstring logicalName, integer4 timeOut=-1, varstring espServerIpPort=GETENV('ws_fs_server')) :=
     lib_fileservices.FileServices.fReplicate(logicalName, timeOut, espServerIpPort);
@@ -398,11 +398,11 @@ EXPORT varstring WaitDfuWorkunit(varstring wuid, integer4 timeOut=-1, varstring 
 EXPORT AbortDfuWorkunit(varstring wuid, varstring espServerIpPort=GETENV('ws_fs_server')) :=
     lib_fileservices.FileServices.AbortDfuWorkunit(wuid, espServerIpPort);
 
-EXPORT MonitorLogicalFileName(varstring eventname, varstring name, integer4 shotcount=1, varstring espServerIpPort=GETENV('ws_fs_server')) :=
-    lib_fileservices.FileServices.MonitorLogicalFileName(eventname, name, shotcount, espServerIpPort);
+EXPORT MonitorLogicalFileName(varstring event_name, varstring name, integer4 shotcount=1, varstring espServerIpPort=GETENV('ws_fs_server')) :=
+    lib_fileservices.FileServices.MonitorLogicalFileName(event_name, name, shotcount, espServerIpPort);
 
-EXPORT MonitorFile(varstring eventname, varstring ip, varstring filename, boolean subdirs=false, integer4 shotcount=1, varstring espServerIpPort=GETENV('ws_fs_server')) :=
-    lib_fileservices.FileServices.MonitorFile(eventname, ip, filename, subdirs, shotcount, espServerIpPort);
+EXPORT MonitorFile(varstring event_name, varstring ip, varstring filename, boolean subdirs=false, integer4 shotcount=1, varstring espServerIpPort=GETENV('ws_fs_server')) :=
+    lib_fileservices.FileServices.MonitorFile(event_name, ip, filename, subdirs, shotcount, espServerIpPort);
 
 EXPORT RemotePull(varstring remoteEspFsURL, varstring sourceLogicalName, varstring destinationGroup, varstring destinationLogicalName, integer4 timeOut=-1, integer4 maxConnections=-1, boolean allowoverwrite=false, boolean replicate=false, boolean asSuperfile=false, boolean forcePush=false, integer4 transferBufferSize=0, boolean wrap=false, boolean compress=false) :=
     lib_fileservices.FileServices.RemotePull(remoteEspFsURL, sourceLogicalName, destinationGroup, destinationLogicalName, timeOut, maxConnections, allowoverwrite, replicate, asSuperfile, forcePush, transferBufferSize, wrap, compress);

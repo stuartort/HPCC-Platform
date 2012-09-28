@@ -1,19 +1,18 @@
 /*##############################################################################
 
-    Copyright (C) 2011 HPCC Systems.
+    HPCC SYSTEMS software Copyright (C) 2012 HPCC Systems.
 
-    All rights reserved. This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as
-    published by the Free Software Foundation, either version 3 of the
-    License, or (at your option) any later version.
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
+       http://www.apache.org/licenses/LICENSE-2.0
 
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
 ############################################################################## */
 
 #include "thgraph.hpp"
@@ -513,21 +512,17 @@ void CGraphElementBase::serializeCreateContext(MemoryBuffer &mb)
 {
     if (!onCreateCalled) return;
     mb.append(queryId());
-    unsigned pos = mb.length();
-    mb.append((size32_t)0);
+    DelayedSizeMarker sizeMark(mb);
     queryHelper()->serializeCreateContext(mb);
-    size32_t sz = (mb.length()-pos)-sizeof(size32_t);
-    mb.writeDirect(pos, sizeof(sz), &sz);
+    sizeMark.write();
 }
 
 void CGraphElementBase::serializeStartContext(MemoryBuffer &mb)
 {
     assertex(onStartCalled);
-    unsigned pos = mb.length();
-    mb.append((size32_t)0);
+    DelayedSizeMarker sizeMark(mb);
     queryHelper()->serializeStartContext(mb);
-    size32_t sz = (mb.length()-pos)-sizeof(size32_t);
-    mb.writeDirect(pos, sizeof(sz), &sz);
+    sizeMark.write();
 }
 
 void CGraphElementBase::deserializeCreateContext(MemoryBuffer &mb)
@@ -651,6 +646,8 @@ bool CGraphElementBase::prepareContext(size32_t parentExtractSz, const byte *par
                 onStart(parentExtractSz, parentExtract);
                 IHThorCaseArg *helper = (IHThorCaseArg *)baseHelper.get();
                 whichBranch = helper->getBranch();
+                if (whichBranch >= inputs.ordinality())
+                    whichBranch = inputs.ordinality()-1;
                 if (inputs.queryItem(whichBranch))
                     return inputs.item(whichBranch)->activity->prepareContext(parentExtractSz, parentExtract, checkDependencies, false, async);
                 return true;
@@ -911,6 +908,7 @@ bool isGlobalActivity(CGraphElementBase &container)
 // always local
         case TAKcountdisk:
         case TAKfilter:
+        case TAKfilterproject:
         case TAKsplit:
         case TAKpipewrite:
         case TAKdegroup:
@@ -1052,8 +1050,7 @@ void CGraphBase::clean()
 
 void CGraphBase::serializeCreateContexts(MemoryBuffer &mb)
 {
-    unsigned pos = mb.length();
-    mb.append((unsigned)0);
+    DelayedSizeMarker sizeMark(mb);
     Owned<IThorActivityIterator> iter = (queryOwner() && !isGlobal()) ? getIterator() : getTraverseIterator(true); // all if non-global-child, or graph with conditionals
     ForEach (*iter)
     {
@@ -1061,14 +1058,12 @@ void CGraphBase::serializeCreateContexts(MemoryBuffer &mb)
         element.serializeCreateContext(mb);
     }
     mb.append((activity_id)0);
-    unsigned len=mb.length()-pos-sizeof(unsigned);
-    mb.writeDirect(pos, sizeof(len), &len);
+    sizeMark.write();
 }
 
 void CGraphBase::serializeStartContexts(MemoryBuffer &mb)
 {
-    unsigned pos = mb.length();
-    mb.append((unsigned)0);
+    DelayedSizeMarker sizeMark(mb);
     Owned<IThorActivityIterator> iter = getTraverseIterator();
     ForEach (*iter)
     {
@@ -1077,8 +1072,7 @@ void CGraphBase::serializeStartContexts(MemoryBuffer &mb)
         element.serializeStartContext(mb);
     }
     mb.append((activity_id)0);
-    unsigned len=mb.length()-pos-sizeof(unsigned);
-    mb.writeDirect(pos, sizeof(len), &len);
+    sizeMark.write();
 }
 
 void CGraphBase::deserializeCreateContexts(MemoryBuffer &mb)
@@ -1804,7 +1798,7 @@ StringBuffer &getGlobals(CGraphBase &graph, StringBuffer &str)
 
             ThorActivityKind kind = e.getKind();
             str.append(activityKindStr(kind));
-            str.append("(").append(kind).append(")");
+            str.append("(").append(e.queryId()).append(")");
         }
     }
     if (!first)
@@ -2361,6 +2355,12 @@ void CJobBase::init()
     if (gmemSize && largeMemSize >= gmemSize)
         throw MakeStringException(0, "largeMemSize(%d) can not exceed globalMemorySize(%d)", largeMemSize, gmemSize);
     PROGLOG("Global memory size = %d MB, large mem size = %d MB", gmemSize, largeMemSize);
+    StringBuffer tracing("maxActivityCores = ");
+    if (maxActivityCores)
+        tracing.append(maxActivityCores);
+    else
+        tracing.append("[unbound]");
+    PROGLOG("%s", tracing.str());
     setLargeMemSize(largeMemSize);
     graphExecutor.setown(new CGraphExecutor(*this));
 }
@@ -2375,6 +2375,13 @@ CJobBase::~CJobBase()
     ::Release(userDesc);
     timeReporter->Release();
     delete pluginMap;
+
+    StringBuffer memStatsStr;
+    roxiemem::memstats(memStatsStr);
+    PROGLOG("Roxiemem stats: %s", memStatsStr.str());
+    memsize_t heapUsage = getMapInfo("heap");
+    if (heapUsage) // if 0, assumed to be unavailable
+        PROGLOG("Heap usage : %"I64F"d bytes", (unsigned __int64)heapUsage);
 }
 
 bool CJobBase::queryForceLogging(graph_id graphId, bool def) const
@@ -2599,7 +2606,7 @@ void CJobBase::runSubgraph(CGraphBase &graph, size32_t parentExtractSz, const by
     graph.executeSubGraph(parentExtractSz, parentExtract);
 }
 
-IEngineRowAllocator *CJobBase::getRowAllocator(IOutputMetaData * meta, unsigned activityId) const
+IEngineRowAllocator *CJobBase::getRowAllocator(IOutputMetaData * meta, unsigned activityId, roxiemem::RoxieHeapFlags flags) const
 {
     return thorAllocator->getRowAllocator(meta, activityId);
 }
