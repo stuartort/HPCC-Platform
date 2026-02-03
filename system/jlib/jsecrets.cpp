@@ -56,6 +56,9 @@
 //#define TRACE_SECRETS
 #include <vector>
 
+// Default AKeyless access ID for containerized deployments
+constexpr const char* DEFAULT_AKEYLESS_ACCESS_ID = "hpcc-akeyless-access";
+
 // AKeyless does not require different kinds like Vault's kv_v1/kv_v2
 // Keep enum for backward compatibility but it's no longer used
 enum class CVaultKind { kv_v1, kv_v2 };
@@ -361,8 +364,8 @@ static StringBuffer &buildSecretPath(StringBuffer &path, const char *category, c
 }
 
 
-// AKeyless authentication types - similar to Vault but with unified approach
-enum class VaultAuthType {unknown, k8s, apiKey, token, clientcert};
+// Authentication types for secrets management (AKeyless and local k8s)
+enum class AuthType {unknown, k8s, apiKey, token, clientcert};
 
 static void setTimevalMS(timeval &tv, time_t ms)
 {
@@ -595,7 +598,7 @@ private:
 class CAKeyless
 {
 private:
-    VaultAuthType authType = VaultAuthType::unknown;
+    AuthType authType = AuthType::unknown;
 
     CVaultKind kind; // Kept for compatibility but not used by AKeyless
     CriticalSection akeylessCS;
@@ -679,7 +682,7 @@ public:
         if (accessId.length())
         {
             // API Key authentication (equivalent to Vault's appRole)
-            authType = VaultAuthType::apiKey;
+            authType = AuthType::apiKey;
             if (vault->hasProp("@accessKeySecret"))
                 accessKeySecretName.set(vault->queryProp("@accessKeySecret"));
             if (accessKeySecretName.isEmpty())
@@ -695,7 +698,7 @@ public:
                 StringBuffer tokenText;
                 if (getSecretKeyValue(clientToken, clientSecret, "token"))
                 {
-                    authType = VaultAuthType::token;
+                    authType = AuthType::token;
                     PROGLOG("using a pre-provisioned token for AKeyless auth");
                 }
             }
@@ -703,17 +706,22 @@ public:
         else if (vault->getPropBool("@useTLSCertificateAuth", false))
         {
             // Certificate authentication
-            authType = VaultAuthType::clientcert;
+            authType = AuthType::clientcert;
             accessId.set(vault->queryProp("@accessId")); // Access ID required for cert auth
+            if (accessId.isEmpty())
+            {
+                WARNLOG("AKeyless certificate auth configured but @accessId not specified, using default");
+                accessId.set(DEFAULT_AKEYLESS_ACCESS_ID);
+            }
             PROGLOG("using TLS certificate auth for AKeyless");
         }
         else if (isContainerized())
         {
             // Kubernetes authentication
-            authType = VaultAuthType::k8s;
+            authType = AuthType::k8s;
             accessId.set(vault->queryProp("@accessId")); // Access ID required for k8s auth
             if (accessId.isEmpty())
-                accessId.set("hpcc-akeyless-access");
+                accessId.set(DEFAULT_AKEYLESS_ACCESS_ID);
             PROGLOG("using kubernetes AKeyless auth");
         }
     }
@@ -721,13 +729,13 @@ public:
     {
         switch (authType)
         {
-            case VaultAuthType::apiKey:
+            case AuthType::apiKey:
                 return "apikey";
-            case VaultAuthType::k8s:
+            case AuthType::k8s:
                 return "kubernetes";
-            case VaultAuthType::token:
+            case AuthType::token:
                 return "token";
-            case VaultAuthType::clientcert:
+            case AuthType::clientcert:
                 return "clientcert";
         }
         return "unknown";
@@ -918,13 +926,13 @@ public:
     }
     void checkAuthentication(bool permissionDenied)
     {
-        if (authType == VaultAuthType::apiKey)
+        if (authType == AuthType::apiKey)
             apiKeyLogin(permissionDenied);
-        else if (authType == VaultAuthType::k8s)
+        else if (authType == AuthType::k8s)
             kubernetesLogin(permissionDenied);
-        else if (authType == VaultAuthType::clientcert)
+        else if (authType == AuthType::clientcert)
             clientCertLogin(permissionDenied);
-        else if (permissionDenied && authType == VaultAuthType::token)
+        else if (permissionDenied && authType == AuthType::token)
             akeylessAuthError("token permission denied"); //don't permanently invalidate token. Try again next time because it could be permissions for a particular secret rather than invalid token
         if (clientToken.isEmpty())
             akeylessAuthError("no akeyless access token");
@@ -1200,7 +1208,7 @@ static IPropertyTree * resolveLocalSecret(const char *category, const char * nam
     return tree.getClear();
 }
 
-static IPropertyTree *createPTreeFromAKeylessSecret(const char *content, CVaultKind kind, const char *secretPath)
+static IPropertyTree *createPTreeFromAKeylessSecret(const char *content, CVaultKind kind, const char *secretName)
 {
     if (isEmptyString(content))
         return nullptr;
@@ -1209,46 +1217,59 @@ static IPropertyTree *createPTreeFromAKeylessSecret(const char *content, CVaultK
     if (!tree)
         return nullptr;
     
-    // AKeyless returns secrets in a different format than Vault
-    // Response format: {"/path/to/secret": "value"} or {"/path/to/secret": {"key1": "val1", ...}}
+    // AKeyless returns secrets in format: {"/full/path/to/secret": value_or_object}
+    // where value_or_object can be a string or a JSON object with key-value pairs
     
-    // Try to get the secret by its path
-    if (!isEmptyString(secretPath))
-    {
-        IPropertyTree *secretData = tree->queryPropTree(secretPath);
-        if (secretData)
-        {
-            tree.setown(LINK(secretData));
-            return tree.getClear();
-        }
-    }
-    
-    // If secretPath doesn't work, check if there's a single property that contains the secret
-    // This handles both string values and object values
+    // Try to find the secret by looking for a path that ends with the secret name
+    // This handles cases where namespace prefix may or may not be included
     Owned<IPropertyTreeIterator> props = tree->getElements("*");
-    if (props->first())
+    ForEach(*props)
     {
         IPropertyTree &prop = props->query();
-        // If it's a simple property with a string value, return it
-        if (!props->next())
+        const char *propName = prop.queryName();
+        
+        // Check if this property name ends with our secret name
+        // This allows matching "/namespace/category/secretname" or just "/secretname"
+        if (propName && secretName)
         {
-            const char *val = prop.queryProp(nullptr);
-            if (val)
+            const char *lastSlash = strrchr(propName, '/');
+            const char *baseName = lastSlash ? lastSlash + 1 : propName;
+            if (streq(baseName, secretName))
             {
-                // Simple string value
-                Owned<IPropertyTree> result = createPTree();
-                result->setProp("value", val);
-                return result.getClear();
-            }
-            else
-            {
-                // Object value - return as is
-                return LINK(&prop);
+                // Get the text value of the property
+                const char *val = prop.queryProp("");
+                if (val)
+                {
+                    // Simple string value - wrap in a tree with "value" key for compatibility
+                    Owned<IPropertyTree> result = createPTree();
+                    result->setProp("value", val);
+                    return result.getClear();
+                }
+                else
+                {
+                    // Object value with multiple fields - return as is
+                    return LINK(&prop);
+                }
             }
         }
     }
     
-    // Fallback to returning the tree as-is for backward compatibility
+    // Fallback: if only one top-level property, return it
+    props.setown(tree->getElements("*"));
+    if (props->first() && !props->next())
+    {
+        IPropertyTree &prop = props->query();
+        const char *val = prop.queryProp("");
+        if (val)
+        {
+            Owned<IPropertyTree> result = createPTree();
+            result->setProp("value", val);
+            return result.getClear();
+        }
+        return LINK(&prop);
+    }
+    
+    // Last resort: return the tree as-is
     return tree.getClear();
 }
 
@@ -1267,10 +1288,8 @@ static IPropertyTree *resolveAKeylessSecret(const char *category, const char * n
         if (!akeylessmgr->requestSecretFromVault(category, akeylessId, kind, json, name, version))
             return nullptr;
     }
-    // Build the expected secret path for parsing response
-    StringBuffer secretPath("/");
-    secretPath.append(category).append("/").append(name);
-    return createPTreeFromAKeylessSecret(json.str(), kind, secretPath.str());
+    // Pass the secret name (not full path) for flexible matching in response parsing
+    return createPTreeFromAKeylessSecret(json.str(), kind, name);
 }
 
 static IPropertyTree * resolveSecret(const char *category, const char * name, const char * optAKeylessId, const char * optVersion)
