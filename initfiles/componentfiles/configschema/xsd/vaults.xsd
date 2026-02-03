@@ -25,28 +25,34 @@
         <xs:element name="vaults" hpcc:displayName="vaults section" hpcc:itemType="vaults" hpcc:class="component">
             <xs:complexType>
                 <xs:sequence>
-                    <xs:element name="git" hpcc:displayName="Vault Git Group" hpcc:class="elementSet" minOccurs="0" maxOccurs="unbounded">
+                    <xs:element name="git" hpcc:displayName="AKeyless Git Group" hpcc:class="elementSet" minOccurs="0" maxOccurs="unbounded">
                         <xs:complexType>
-                            <xs:attribute name="name" hpcc:displayName="name" type="xs:string" hpcc:presetValue="git_vault" hpcc:tooltip="Name of the vault"/>
-                            <xs:attribute name="url" hpcc:displayName="url" type="xs:string" hpcc:tooltip="Vault url"/>
-                            <xs:attribute name="kind" hpcc:displayName="kind" type="xs:string" hpcc:presetValue="kv_v2" hpcc:tooltip="Kind of vault"/>
-                            <xs:attribute name="client-secret" hpcc:displayName="client-secret" type="xs:string" hpcc:tooltip="Client secret"/>
+                            <xs:attribute name="name" hpcc:displayName="name" type="xs:string" hpcc:presetValue="git_akeyless" hpcc:tooltip="Name of the AKeyless instance"/>
+                            <xs:attribute name="url" hpcc:displayName="url" type="xs:string" hpcc:tooltip="AKeyless gateway URL (e.g., https://api.akeyless.io)"/>
+                            <xs:attribute name="accessId" hpcc:displayName="accessId" type="xs:string" hpcc:tooltip="AKeyless access ID for authentication"/>
+                            <xs:attribute name="accessKeySecret" hpcc:displayName="accessKeySecret" type="xs:string" hpcc:tooltip="Name of k8s secret containing access key"/>
+                            <xs:attribute name="client-secret" hpcc:displayName="client-secret" type="xs:string" hpcc:tooltip="Name of k8s secret containing pre-provisioned token"/>
+                            <xs:attribute name="namespace" hpcc:displayName="namespace" type="xs:string" hpcc:tooltip="Optional path prefix for secrets"/>
                         </xs:complexType>
                     </xs:element>
-                    <xs:element name="ecl" hpcc:displayName="Vault ECL Group" hpcc:class="elementSet" minOccurs="0" maxOccurs="unbounded">
+                    <xs:element name="ecl" hpcc:displayName="AKeyless ECL Group" hpcc:class="elementSet" minOccurs="0" maxOccurs="unbounded">
                         <xs:complexType>
-                            <xs:attribute name="name" hpcc:displayName="name" type="xs:string" hpcc:presetValue="ecl_vault" hpcc:tooltip="Name of the vault"/>
-                            <xs:attribute name="url" hpcc:displayName="url" type="xs:string" hpcc:tooltip="Vault url"/>
-                            <xs:attribute name="kind" hpcc:displayName="kind" type="xs:string" hpcc:presetValue="kv_v2" hpcc:tooltip="Kind of vault"/>
-                            <xs:attribute name="client-secret" hpcc:displayName="client-secret" type="xs:string" hpcc:tooltip="Client secret"/>
+                            <xs:attribute name="name" hpcc:displayName="name" type="xs:string" hpcc:presetValue="ecl_akeyless" hpcc:tooltip="Name of the AKeyless instance"/>
+                            <xs:attribute name="url" hpcc:displayName="url" type="xs:string" hpcc:tooltip="AKeyless gateway URL (e.g., https://api.akeyless.io)"/>
+                            <xs:attribute name="accessId" hpcc:displayName="accessId" type="xs:string" hpcc:tooltip="AKeyless access ID for authentication"/>
+                            <xs:attribute name="accessKeySecret" hpcc:displayName="accessKeySecret" type="xs:string" hpcc:tooltip="Name of k8s secret containing access key"/>
+                            <xs:attribute name="client-secret" hpcc:displayName="client-secret" type="xs:string" hpcc:tooltip="Name of k8s secret containing pre-provisioned token"/>
+                            <xs:attribute name="namespace" hpcc:displayName="namespace" type="xs:string" hpcc:tooltip="Optional path prefix for secrets"/>
                         </xs:complexType>
                     </xs:element>
-                    <xs:element name="eclUser" hpcc:displayName="Vault ECLUser Group" hpcc:class="elementSet" minOccurs="0" maxOccurs="unbounded">
+                    <xs:element name="eclUser" hpcc:displayName="AKeyless ECLUser Group" hpcc:class="elementSet" minOccurs="0" maxOccurs="unbounded">
                         <xs:complexType>
-                            <xs:attribute name="name" hpcc:displayName="name" type="xs:string" hpcc:presetValue="eclUser_vault" hpcc:tooltip="Name of the vault"/>
-                            <xs:attribute name="url" hpcc:displayName="url" type="xs:string" hpcc:tooltip="Vault url"/>
-                            <xs:attribute name="kind" hpcc:displayName="kind" type="xs:string" hpcc:presetValue="kv_v2" hpcc:tooltip="Kind of vault"/>
-                            <xs:attribute name="client-secret" hpcc:displayName="client-secret" type="xs:string" hpcc:tooltip="Client secret"/>
+                            <xs:attribute name="name" hpcc:displayName="name" type="xs:string" hpcc:presetValue="eclUser_akeyless" hpcc:tooltip="Name of the AKeyless instance"/>
+                            <xs:attribute name="url" hpcc:displayName="url" type="xs:string" hpcc:tooltip="AKeyless gateway URL (e.g., https://api.akeyless.io)"/>
+                            <xs:attribute name="accessId" hpcc:displayName="accessId" type="xs:string" hpcc:tooltip="AKeyless access ID for authentication"/>
+                            <xs:attribute name="accessKeySecret" hpcc:displayName="accessKeySecret" type="xs:string" hpcc:tooltip="Name of k8s secret containing access key"/>
+                            <xs:attribute name="client-secret" hpcc:displayName="client-secret" type="xs:string" hpcc:tooltip="Name of k8s secret containing pre-provisioned token"/>
+                            <xs:attribute name="namespace" hpcc:displayName="namespace" type="xs:string" hpcc:tooltip="Optional path prefix for secrets"/>
                         </xs:complexType>
                     </xs:element>
                 </xs:sequence>
