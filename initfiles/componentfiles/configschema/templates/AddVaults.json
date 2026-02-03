@@ -1,6 +1,6 @@
 {
-    "name": "Add Vault Feature",
-    "description": "Add necessary keys with empty values for vault feature",
+    "name": "Add AKeyless Feature",
+    "description": "Add necessary keys with empty values for AKeyless feature",
     "type": "modification",
     "operations": [
         {
@@ -29,19 +29,23 @@
                 "attributes": [
                     {
                         "name": "name",
-                        "value": "git_vault"
+                        "value": "git_akeyless"
                     },
                     {
                         "name": "url",
-                        "value": "insert_your_url_here"
+                        "value": "https://api.akeyless.io"
                     },
                     {
-                        "name": "kind",
-                        "value": "kv_v2"
+                        "name": "accessId",
+                        "value": "your-access-id"
                     },
                     {
-                        "name": "client-secret",
-                        "value": "remove_this_if_unused"
+                        "name": "accessKeySecret",
+                        "value": "accessKeySecret"
+                    },
+                    {
+                        "name": "namespace",
+                        "value": "optional-path-prefix"
                     }
                 ]
             }
@@ -55,19 +59,23 @@
                 "attributes": [
                     {
                         "name": "name",
-                        "value": "ecl_vault"
+                        "value": "ecl_akeyless"
                     },
                     {
                         "name": "url",
-                        "value": "insert_your_url_here"
+                        "value": "https://api.akeyless.io"
                     },
                     {
-                        "name": "kind",
-                        "value": "kv_v2"
+                        "name": "accessId",
+                        "value": "your-access-id"
                     },
                     {
-                        "name": "client-secret",
-                        "value": "remove_this_if_unused"
+                        "name": "accessKeySecret",
+                        "value": "accessKeySecret"
+                    },
+                    {
+                        "name": "namespace",
+                        "value": "optional-path-prefix"
                     }
                 ]
             }
@@ -81,19 +89,23 @@
                 "attributes": [
                     {
                         "name": "name",
-                        "value": "eclUser_vault"
+                        "value": "eclUser_akeyless"
                     },
                     {
                         "name": "url",
-                        "value": "insert_your_url_here"
+                        "value": "https://api.akeyless.io"
                     },
                     {
-                        "name": "kind",
-                        "value": "kv_v2"
+                        "name": "accessId",
+                        "value": "your-access-id"
                     },
                     {
-                        "name": "client-secret",
-                        "value": "remove_this_if_unused"
+                        "name": "accessKeySecret",
+                        "value": "accessKeySecret"
+                    },
+                    {
+                        "name": "namespace",
+                        "value": "optional-path-prefix"
                     }
                 ]
             }
